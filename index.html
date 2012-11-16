@@ -22,9 +22,11 @@
       <label>Initially infected <input id="initial" value="1" type="text" data-persist title="Number of individuals initially infected." /></label>
       <label>Infectiousness <input id="infectiousness" value="0.7" type="text" data-persist title="Probability of an individual becoming infected by a single exposure." /></label>
     </fieldset>
-    <!-- <label>Iterations <input id="iterations" value="100" type="text" data-persist /></label> -->
-    <label><input id="animate" type="checkbox" data-persist checked /> Animate</label><!-- checked="checked" -->
-    <label><input id="visualize" type="checkbox" data-persist checked /> Visualize</label><!-- checked="checked" -->
+    <fieldset><legend>Transmission</legend>
+      <label><input id="animate" type="checkbox" data-persist checked /> Animate Interval (ms)</label>
+      <input id="interval" value="100" type="text" data-persist />
+    </fieldset>
+    <label><input id="visualize" type="checkbox" data-persist checked /> Visualize</label>
     <button id="reload">Reload</button>
   </div>
   <div id="content">
@@ -52,52 +54,9 @@ Array.prototype.removeAt = function(index) {
   return this.push.apply(this, rest);
 };
 
-var Individual = Backbone.Model.extend({
-  initialize: function(opts) {
-    this.friends = [];
-    this.inceptions = []; // inceptions is a list of {infection: Infection, timestep: Int} pairs
-  },
-  addFriend: function(friend) {
-    if (friend !== this && _.excludes(this.friends, friend)) {
-      this.friends.push(friend);
-    }
-  },
-  expose: function(infection, timestep) {
-    // if they've contracted the infection already, they're immune to anything further
-    if (_.excludes(this.infections(), infection)) {
-      // otherwise, contract with probability 1 -
-      var rand_unif = Math.random();
-      if (rand_unif < infection.infectiousness) {
-        this.inceptions.push({infection: infection, timestep: timestep});
-      }
-    }
-  },
-  infections: function(timestep) {
-    var active_infections = [];
-    this.inceptions.forEach(function(inception) {
-      if (timestep === undefined || timestep > inception.timestep) {
-        active_infections.push(inception.infection);
-      }
-    });
-    return active_infections;
-  },
-  toString: function() {
-    this.friends = [];
-    return _.pluck(this.infections, 'name').join(', ');
-  }
-});
-
-var Infection = Backbone.Model.extend({
-  initialize: function(opts) {
-    this.name = opts.name;
-    this.infectiousness = opts.infectiousness;
-  }
-});
-
 function pairSort(pair) {
   return (pair[0] < pair[1]) ? pair : [pair[1], pair[0]];
 }
-
 function generateWattsStrogatz(N, K, beta) {
   assert(0 <= beta && beta <= 1, '0 ≤ β ≤ 1 violated!');
   // console.log('Generating Watts Strogatz small world graph', [N, K, Math.log(N), 1].join(' >> '), '| β =', beta);
@@ -149,10 +108,65 @@ function generateWattsStrogatz(N, K, beta) {
   return {nodes: nodes, edges: edges};
 }
 
+
+
+var Individual = Backbone.Model.extend({
+  initialize: function(opts) {
+    this.friends = [];
+    // inbox is a dictionary whose keys are timesteps, and values are lists of Infections
+    this.inbox = {};
+    this.outbox = {};
+  },
+  // addFriend: function(friend) {
+  //   if (friend !== this && _.excludes(this.friends, friend)) {
+  //     this.friends.push(friend);
+  //   }
+  // },
+  receive: function(timestep, infection) {
+    if (this.inbox[timestep] === undefined) this.inbox[timestep] = [];
+    if (infection)
+      this.inbox[timestep].push(infection);
+    // if (_.excludes(this.infections(), infection)) {
+    //   // otherwise, contract with probability 1 -
+    //   var rand_unif = Math.random();
+    //   if (rand_unif < infection.infectiousness) {
+    //     this.inbox.push({infection: infection, timestep: timestep});
+    //   }
+    // }
+  },
+  outboxAt: function(timestep) {
+    if (!this.outbox[timestep]) {
+      // inherit the old outbox directly if we have one
+      var heeded = (this.outbox[timestep - 1] || []).slice(0);
+      this.inbox[timestep].forEach(function(infection) {
+        if (Math.random() < infection.infectiousness) {
+          heeded.push(infection);
+        }
+      });
+      // remove duplicates (can only have a disease once at a time)
+      this.outbox[timestep] = _.uniq(heeded, function(message) {
+        return message.name;
+      })
+    }
+    return this.outbox[timestep];
+  },
+  active: function(timestep) {
+    // DON'T (for now): use outbox[ts] instead of outboxAt to ensure that it's already been computed
+    return this.outboxAt(timestep).length > 0;
+  }
+});
+
+var Infection = Backbone.Model.extend({
+  initialize: function(opts) {
+    this.name = opts.name;
+    this.infectiousness = opts.infectiousness;
+  }
+});
+
 var Population = Backbone.Model.extend({
   initialize: function(opts) {
     // opts.nodes (list of integers) and opts.edges (list of pairs of integers) must be set
-    var individuals = opts.nodes.map(function(i) {
+    var individuals = this.individuals = opts.nodes.map(function(i) {
       return new Individual({});
     });
     opts.edges.forEach(function(edge) {
@@ -160,13 +174,12 @@ var Population = Backbone.Model.extend({
       individuals[edge[0]].friends.push(individuals[edge[1]]);
       individuals[edge[1]].friends.push(individuals[edge[0]]);
     });
-    this.individuals = individuals;
   },
   nodes: function() {
     return this.individuals;
   },
   links: function() {
-    var all_links = []; // list of {source: node1, target: node2} objects
+    var all_links = []; // list of (directed) {source: node1, target: node2} objects
     this.individuals.forEach(function(individual, i) {
       individual.friends.forEach(function(friend) {
         all_links.push({source: individual, target: friend});
@@ -174,28 +187,23 @@ var Population = Backbone.Model.extend({
     });
     return all_links;
   },
-  toString: function() {
-    return this.individuals.map(function(individual, i) {
-      return i + ':' + individual.toString();
-    }).join(' ');
-  },
-  forEachFriendship: function(callback) {
-    this.individuals.forEach(function(individual) {
-      individual.friends.forEach(function(friend) {
-        callback(individual, friend);
-      });
-    });
-  },
-  infectedAt: function(timestep) {
-    return this.individuals.filter(function(individual) {
-      return individual.infections(timestep).length
-    });
+  // toString: function() {
+  //   return this.individuals.map(function(individual, i) {
+  //     return i + ':' + individual.toString();
+  //   }).join(' ');
+  // },
+  // infected: function(timestep) {
+  //   this.individuals.filter(function(individual) {
+  // });
+  activeIndividuals: function(timestep) {
+    return _.filter(this.individuals, function(individual) { return individual.active(timestep); });
   }
 });
 
 var Simulation = Backbone.Model.extend({
   timestep: 0,
   r: 4,
+  total: false,
   initialize: function(opts) {
     // if opts.visualize is true, expect opts.svg, and opts.population
     this.population = opts.population;
@@ -234,7 +242,6 @@ var Simulation = Backbone.Model.extend({
         .data(nodes)
       .enter().append('circle')
         .attr('class', 'node')
-        .attr('r', this.r - .75)
         .call(this.force.drag);
     // node.append('title')
         // .text(function(d) { return d.name; });
@@ -257,46 +264,53 @@ var Simulation = Backbone.Model.extend({
       .attr('x2', function(d) { return d.target.x; })
       .attr('y2', function(d) { return d.target.y; })
       .style('stroke-width', function(d) {
-        return (d.source.infections(self.timestep + 1).length) + 0.4;
+        return (d.source.active(self.timestep) * 1.5) + 0.4;
       })
       .style('stroke', function(d) {
-        return d.source.infections(self.timestep + 1).length > 0 ? '#798' : 'orange';
+        return d.source.active(self.timestep) > 0 ? '#798' : 'orange';
       });
 
     this.node.attr('cx', function(d) { return d.x = constrain(self.r, d.x, self.width - self.r); })
       .attr('cy', function(d) { return d.y = constrain(self.r, d.y, self.height - self.r); })
-      .style('fill', function(d) { return d.infections(self.timestep + 1).length > 0 ? '#798' : 'orange'; });
+      .attr('r', function(d) { return d.active(self.timestep) > 0 ? self.r + .75 : self.r - .75; })
+      .style('fill', function(d) { return d.active(self.timestep) > 0 ? '#798' : 'orange'; });
 
-    this.timestep_label.text('t = ' + (self.timestep + 1));
-  },
-  history: function() {
-    var self = this;
-    // count and record current infections
-    return _.range(this.timestep + 2).map(function(timestep) {
-      return self.population.individuals.filter(function(individual) {
-        return individual.infections(timestep).length
-      }).length;
-    });
+    this.timestep_label.text('t = ' + (self.timestep));
   },
   step: function() {
     var self = this;
-    // proceed with the next wave
+    // proceed with the next wave, i.e. send messages around
     this.timestep++;
-    this.population.forEachFriendship(function(individual, friend) {
-      individual.infections(self.timestep).forEach(function(infection) {
-        friend.expose(infection, self.timestep);
+    // timestamp = 1 is the first one that we send around messages for
+    this.population.individuals.forEach(function(individual) {
+      individual.friends.forEach(function(friend) {
+        // calculate what goes to all the friends' inboxes from this individuals' last outbox
+        individual.outboxAt(self.timestep - 1).forEach(function(infection) {
+          friend.receive(self.timestep, infection);
+        });
       });
+      // zero out his inbox
+      individual.receive(self.timestep);
     });
+    // at this point, all infections for the "timestamp" slot are finished.
+    // so we solidify the results, but calling out whose active
+    var total_active = this.population.activeIndividuals(this.timestep).length;
+    this.total = total_active === this.population.individuals.length;
 
     if (this.visualize)
       this.updateViz();
 
-    var infected = this.population.infectedAt(this.timestep).length;
-    if (infected === this.population.individuals.length) {
-      this.total = true;
-    }
-    return infected;
-  }
+    return total_active;
+  },
+  // his tory: function() {
+  //   var self = this;
+  //   // count and record current infections
+  //   return _.range(this.timestep + 2).map(function(timestep) {
+  //     return self.population.individuals.filter(function(individual) {
+  //       return individual.infections(timestep).length
+  //     }).length;
+  //   });
+  // }
 });
 
 var Generator = Backbone.Model.extend({
@@ -314,23 +328,29 @@ var Generator = Backbone.Model.extend({
     var graph = generateWattsStrogatz(N, K, beta);
     // graph.nodes and graph.edges are now set correctly
     var population = new Population(graph);
+    window.population = population;
 
     // start if off. patient zero(s).
-    var infectiousness = parseFloat($('#infectiousness').val());
+    var infectiousness = constrain(0, parseFloat($('#infectiousness').val()), 1.0);
     var flu = new Infection({name: 'flu', infectiousness: infectiousness});
-    var initial = parseInt($('#initial').val(), 10);
-    constrain(1, initial, N);
+    var initial = constrain(1, parseInt($('#initial').val(), 10), N);
     assert(!isNaN(initial), "Initially infected must be a number!");
-    //   give up after 100 tries
+
+    // just zero out the other individuals (sending nothing to the initial group doesn't change anything)
+    population.individuals.forEach(function(individual) { individual.receive(0); });
     for (var i = 0; i < initial; i++) {
       var k;
+      // give up after 100 tries to avoid infinite loop (e.g., initial = N - 1)
       for (var j = 0; j < 100; j++) {
         k = Math.random() * N | 0;
-        if (!population.individuals[k].inceptions.length)
+        if (!population.individuals[k].outbox.length)
           break;
       }
-      population.individuals[k].inceptions.push({infection: flu, timestep: 0});
+      // console.log("Forcefully implanting/infecting", k, population.individuals[k]);
+      population.individuals[k].outbox[0] = [flu];
     }
+
+    var interval_ms = constrain(10, parseInt($('#interval').val(), 10), 5000);
 
     this.visualize = $('#visualize').prop('checked');
     this.animate = $('#animate').prop('checked');
@@ -338,13 +358,13 @@ var Generator = Backbone.Model.extend({
     if (this.animate) {
       this.animateInterval = setInterval(function() {
         self.step();
-      }, this.visualize ? 500 : 10);
+      }, this.visualize ? interval_ms : 10);
     }
 
     this.simulation = new Simulation({population: population, visualize: this.visualize, svg: svg});
     // this.simulation.on('saturated', function() {
     //   clearInterval(self.animateInterval);
-    //   // self.records.push(self.simulation.history());
+    //   // self.records.push(self.simulation.his tory());
     //   console.log("Saturated");
     //   self.saturated = true;
     //   self.next();
@@ -352,7 +372,10 @@ var Generator = Backbone.Model.extend({
   },
   step: function() {
     if (this.simulation === undefined || this.simulation.total) {
-      clearInterval(this.animateInterval);
+      // console.log("Beginning:", this.simulation === undefined, "/ Simulation-total", (this.simulation || {}).total);
+      if (this.animate) {
+        clearInterval(this.animateInterval);
+      }
       this.records.push([]);
       this.reset();
     }
@@ -364,8 +387,9 @@ var Generator = Backbone.Model.extend({
   },
   renderHistory: function() {
     var svg_height = parseInt(svg.attr('height'), 10);
+    var svg_width = parseInt(svg.attr('width'), 10);
     var records = this.records;
-    var history_width = 760, history_height = 180;
+    var history_width = svg_width - 80, history_height = this.visualize ? 180 : svg_height - 40;
     // body_width = svg_width - (margins.left + margins.right),
     // body_height = svg_height - (margins.top + margins.bottom);
     window.records = records;
@@ -397,7 +421,7 @@ var Generator = Backbone.Model.extend({
       .call(yAxis)
 
     g.append('g')
-      .attr('class', 'inceptions')
+      .attr('class', 'messages')
     .selectAll('path')
       .data(records)
     .enter().append('path')
@@ -416,6 +440,13 @@ var world_records = [];
 var generator = new Generator();
 var svg;
 $('#reload').click(step);
+$('#visualize').on('click', function() {
+  // if they check off the visualize checkbox, remove the graph
+  if (!$(this).prop('checked')) {
+    svg.selectAll('g.network').remove();
+  }
+})
+
 function step() {
   generator.step();
 }
