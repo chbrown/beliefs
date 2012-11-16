@@ -47,6 +47,7 @@ object NoMemory extends App {
           case Some(memory) => memory
           case _ => ' '
         }
+        // println("[Degree %s] %s".format(friends.size, char))
         sender ! Report(char, friends.size)
     }
   }
@@ -83,10 +84,13 @@ object NoMemory extends App {
         }
 
       case TurnIn =>
-        sender ! Summarize
         awake -= 1
         if (awake == 0) {
           println("Everyone sleeps, end of day #%s".format(day))
+          if (day == days - 1) {
+            // is one day enough time to get reports back?
+            sender ! Summarize
+          }
           if (day == days) {
             println("I've heard from everybody, quitting")
             context.system.shutdown()
@@ -100,8 +104,8 @@ object NoMemory extends App {
   }
 
   val akkaSystem = ActorSystem("PropSystem")
-  val population = 25
-  val days = 10
+  val population = 250
+  val days = 100
   val god = akkaSystem.actorOf(Props(new God(population, days)), name="god")
   god ! NewDay
 }

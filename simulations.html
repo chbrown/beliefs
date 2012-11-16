@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<link rel="icon" href="/static/favicon.ico" type="image/x-icon">
+<title>Beliefs</title>
+<script>var started = new Date();</script>
+<link href="/static/site.css" rel="stylesheet" type="text/css" />
+<script src="/static/lib/js/jquery.js"></script>
+<script src="/static/lib/js/jquery.persistance.js"></script>
+<script src="/static/lib/js/backbone_pkg.js"></script>
+<script src="/static/lib/js/d3.v2.js"></script>
+<script src="/static/lib/js/date.js"></script>
+<script src="/static/local.js"></script>
+
+<div id="container">
+  <div id="controls">
+    <fieldset><legend>Graph generation</legend>
+      <label>N <input id="N" value="100" type="text" data-persist title="Cardinality of population" /></label>
+      <label>K <input id="K" value="7" type="text" data-persist title="Mean degree" /></label>
+      <label>β <input id="beta" value="0.5" type="text" data-persist title="Randomness of graph" /></label>
+    </fieldset>
+    <fieldset><legend>Transmission</legend>
+      <label>Initially infected <input id="initial" value="1" type="text" data-persist title="Number of individuals initially infected." /></label>
+      <label>Infectiousness <input id="infectiousness" value="0.8" type="text" data-persist title="Probability of an individual becoming infected by a single exposure." /></label>
+    </fieldset>
+    <!-- <label>Iterations <input id="iterations" value="100" type="text" data-persist /></label> -->
+    <label><input id="animate" type="checkbox" data-persist /> Animate</label><!-- checked="checked" -->
+    <label><input id="visualize" type="checkbox" data-persist /> Visualize</label><!-- checked="checked" -->
+    <button id="reload">Reload</button>
+  </div>
+  <div id="content">
+    <div id="chart">
+    </div>
+  </div>
+</div>
+
+
+<script>
+// finish with jquery.persistance.js
+_.excludes = function() { return !_.contains.apply(_, arguments); }
+function constrain(min, x, max) { return Math.max(min, Math.min(max, x)); }
+function assert(condition, message) { if (!condition) throw new Error(message); }
+Array.prototype.remove = function(item) {
+  // allow removing slices or single objects
+  var index = this.indexOf(item);
+  if (index !== -1)
+    return this.removeAt(index);
+};
+// Array removeAt - By John Resig (MIT Licensed)
+Array.prototype.removeAt = function(index) {
+  var rest = this.slice(index + 1 || this.length);
+  this.length = index < 0 ? this.length + index : index;
+  return this.push.apply(this, rest);
+};
+
+var Individual = Backbone.Model.extend({
+  initialize: function(opts) {
+    this.friends = [];
+    this.inceptions = []; // inceptions is a list of {infection: Infection, timestep: Int} pairs
+  },
+  addFriend: function(friend) {
+    if (friend !== this && _.excludes(this.friends, friend)) {
+      this.friends.push(friend);
+    }
+  },
+  expose: function(infection, timestep) {
+    // if they've contracted the infection already, they're immune to anything further
+    if (_.excludes(this.infections(), infection)) {
+      // otherwise, contract with probability 1 -
+      var rand_unif = Math.random();
+      // console.log(rand_unif, rand_unif < infection.infectiousness);
+      if (rand_unif < infection.infectiousness) {
+        this.inceptions.push({infection: infection, timestep: timestep});
+      }
+    }
+  },
+  infections: function(timestep) {
+    var active_infections = [];
+    this.inceptions.forEach(function(inception) {
+      if (timestep === undefined || timestep > inception.timestep) {
+        active_infections.push(inception.infection);
+      }
+    });
+    return active_infections;
+  },
+  toString: function() {
+    this.friends = [];
+    return _.pluck(this.infections, 'name').join(', ');
+  }
+});
+
+var Infection = Backbone.Model.extend({
+  initialize: function(opts) {
+    this.name = opts.name;
+    this.infectiousness = opts.infectiousness;
+  }
+});
+
+function pairSort(pair) {
+  return (pair[0] < pair[1]) ? pair : [pair[1], pair[0]];
+}
+
+function generateWattsStrogatz(N, K, beta) {
+  assert(0 <= beta && beta <= 1, '0 ≤ β ≤ 1 violated!');
+  // console.log('Generating Watts Strogatz small world graph', [N, K, Math.log(N), 1].join(' >> '), '| β =', beta);
+  var nodes = _.range(N);
+  var edges = {};
+
+  // create ring lattice
+  for (var a = 0; a < N; a++) {
+    for (var j = 0; j < (K / 2); j++) {
+      var b = (a + j + 1) % N;
+      edges[pairSort([a, b])] = 1;
+    }
+  }
+
+  var rewire = function(edge) {
+    // a < b, guaranteed
+    var a = edge[0], b = edge[1];
+    // remove the a->b link
+    delete edges[edge];
+    // find a new edge to make, that doesn't already exist
+    //   give up after 100 tries
+    for (var i = 0, new_b, new_edge; i < 100; i++) {
+      new_b = Math.random() * N | 0;
+      new_edge = pairSort([a, new_b]);
+      if (edges[new_edge] === undefined && a !== new_b) {
+        edges[new_edge] = 1;
+        break;
+      }
+    }
+  };
+
+  // do rewirings
+  for (var a = 0; a < N; a++) {
+    for (var j = 0; j < (K / 2); j++) {
+      var b = (a + j + 1) % N;
+      if (Math.random() < beta) {
+        // rewire! i.e. replace b with some other node on the graph that a is not already connected to.
+        rewire([a, b]);
+      }
+    }
+  }
+
+  // edges is undirected, and edges[x] = [a, b] will have a < b for all x
+  var edges = Object.keys(edges).map(function(edge_string) {
+    return edge_string.split(',').map(function(part) {
+      return parseInt(part, 10);
+    });
+  });
+  return {nodes: nodes, edges: edges};
+}
+
+var Population = Backbone.Model.extend({
+  initialize: function(opts) {
+    // opts.nodes (list of integers) and opts.edges (list of pairs of integers) must be set
+    var individuals = opts.nodes.map(function(i) {
+      return new Individual({});
+    });
+    opts.edges.forEach(function(edge) {
+      // the edges that generateWattsStrogatz returns are undirected
+      individuals[edge[0]].friends.push(individuals[edge[1]]);
+      individuals[edge[1]].friends.push(individuals[edge[0]]);
+    });
+    this.individuals = individuals;
+  },
+  nodes: function() {
+    return this.individuals;
+  },
+  links: function() {
+    var all_links = []; // list of {source: node1, target: node2} objects
+    this.individuals.forEach(function(individual, i) {
+      individual.friends.forEach(function(friend) {
+        all_links.push({source: individual, target: friend});
+      });
+    });
+    return all_links;
+  },
+  toString: function() {
+    return this.individuals.map(function(individual, i) {
+      return i + ':' + individual.toString();
+    }).join(' ');
+  },
+  forEachFriendship: function(callback) {
+    this.individuals.forEach(function(individual) {
+      individual.friends.forEach(function(friend) {
+        callback(individual, friend);
+      });
+    });
+  },
+  infectedAt: function(timestep) {
+    return this.individuals.filter(function(individual) {
+      return individual.infections(timestep).length
+    });
+  }
+});
+
+var Simulation = Backbone.Model.extend({
+  timestep: 0,
+  r: 4,
+  initialize: function(opts) {
+    // if opts.visualize is true, expect opts.svg, and opts.population
+    this.population = opts.population;
+    this.visualize = opts.visualize;
+    if (this.visualize) {
+      this.initializeViz(opts.svg);
+      this.updateViz();
+    }
+  },
+  initializeViz: function(svg) {
+    var nodes = this.population.nodes(),
+      links = this.population.links();
+    // mostly from http://bl.ocks.org/4062045
+    this.width = parseInt(svg.attr('width'), 10);
+    this.height = parseInt(svg.attr('height'), 10);
+    // console.log(svg, width, height, nodes, links)
+
+    this.force = d3.layout.force()
+      .size([this.width, this.height])
+      .charge(-1500)
+      .linkDistance(90)
+      .friction(0.3)
+      .nodes(nodes)
+      .links(links)
+      .start();
+
+    svg.selectAll('g.network').remove();
+    var g = svg.append('g')
+      .attr('class', 'network');
+
+    this.link = g.selectAll('line.link')
+        .data(links)
+      .enter().append('line')
+        .attr('class', 'link');
+
+    this.node = g.selectAll('circle.node')
+        .data(nodes)
+      .enter().append('circle')
+        .attr('class', 'node')
+        .attr('r', this.r - .75)
+        .call(this.force.drag);
+    // node.append('title')
+        // .text(function(d) { return d.name; });
+
+    this.timestep_label = g.append('text')
+        .attr('class', 'label')
+        .attr('x', 5)
+        .attr('y', 15);
+
+    var self = this;
+    this.force.on('tick', function() {
+      self.updateViz();
+    });
+  },
+  updateViz: function() {
+    var self = this;
+    this.link
+      .attr('x1', function(d) { return d.source.x; })
+      .attr('y1', function(d) { return d.source.y; })
+      .attr('x2', function(d) { return d.target.x; })
+      .attr('y2', function(d) { return d.target.y; })
+      .style('stroke-width', function(d) {
+        return (d.source.infections(self.timestep + 1).length) + 0.4;
+      })
+      .style('stroke', function(d) {
+        return d.source.infections(self.timestep + 1).length > 0 ? '#798' : 'orange';
+      });
+
+    this.node.attr('cx', function(d) { return d.x = constrain(self.r, d.x, self.width - self.r); })
+      .attr('cy', function(d) { return d.y = constrain(self.r, d.y, self.height - self.r); })
+      .style('fill', function(d) { return d.infections(self.timestep + 1).length > 0 ? '#798' : 'orange'; });
+
+    this.timestep_label.text('t = ' + (self.timestep + 1));
+  },
+  history: function() {
+    var self = this;
+    // count and record current infections
+    return _.range(this.timestep + 2).map(function(timestep) {
+      return self.population.individuals.filter(function(individual) {
+        return individual.infections(timestep).length
+      }).length;
+    });
+  },
+  step: function() {
+    var self = this;
+    // proceed with the next wave
+    this.timestep++;
+    this.population.forEachFriendship(function(individual, friend) {
+      individual.infections(self.timestep).forEach(function(infection) {
+        friend.expose(infection, self.timestep);
+      });
+    });
+
+    if (this.visualize)
+      this.updateViz();
+
+    var infected = this.population.infectedAt(this.timestep).length;
+    if (infected === this.population.individuals.length) {
+      this.total = true;
+    }
+    return infected;
+  }
+});
+
+var Generator = Backbone.Model.extend({
+  initialize: function(opts) {
+    this.records = [];
+    this.animateInterval = null;
+  },
+  reset: function() {
+    var N = constrain(2, parseInt($('#N').val(), 10), 100000);
+    var K = parseInt($('#K').val(), 10);
+    var beta = parseFloat($('#beta').val(), 10);
+    assert(!isNaN(N), "N must be a number!");
+
+    // Watts and Strogatz
+    var graph = generateWattsStrogatz(N, K, beta);
+    console.log(N, K, beta, graph);
+    // graph.nodes and graph.edges are now set correctly
+    var population = new Population(graph);
+
+    // start if off. patient zero(s).
+    var infectiousness = parseFloat($('#infectiousness').val());
+    var flu = new Infection({name: 'flu', infectiousness: infectiousness});
+    var initial = parseInt($('#initial').val(), 10);
+    constrain(1, initial, N);
+    assert(!isNaN(initial), "Initially infected must be a number!");
+    //   give up after 100 tries
+    console.log('initial', initial);
+    for (var i = 0; i < initial; i++) {
+      var k;
+      for (var j = 0; j < 100; j++) {
+        k = Math.random() * N | 0;
+        if (!population.individuals[k].inceptions.length)
+          break;
+      }
+      population.individuals[k].inceptions.push({infection: flu, timestep: 0});
+    }
+
+    this.visualize = $('#visualize').prop('checked');
+    this.animate = $('#animate').prop('checked');
+    var self = this;
+    if (this.animate) {
+      this.animateInterval = setInterval(function() {
+        self.step();
+      }, this.visualize ? 250 : 10);
+    }
+
+    this.simulation = new Simulation({population: population, visualize: this.visualize, svg: svg});
+    // this.simulation.on('saturated', function() {
+    //   clearInterval(self.animateInterval);
+    //   // self.records.push(self.simulation.history());
+    //   console.log("Saturated");
+    //   self.saturated = true;
+    //   self.next();
+    // });
+  },
+  step: function() {
+    if (this.simulation === undefined || this.simulation.total) {
+      clearInterval(this.animateInterval);
+      this.records.push([]);
+      this.reset();
+    }
+    else {
+      var infected = this.simulation.step();
+      _.last(this.records).push(infected);
+      this.renderHistory();
+    }
+  },
+  renderHistory: function() {
+    var svg_height = parseInt(svg.attr('height'), 10);
+    var records = this.records;
+    var history_width = 760, history_height = 180;
+    // body_width = svg_width - (margins.left + margins.right),
+    // body_height = svg_height - (margins.top + margins.bottom);
+    window.records = records;
+
+    var x_max = d3.max(records, function(d) { return d.length; }),
+      xScale = d3.scale.linear().domain([0, x_max]).range([0, history_width]),
+      xAxis = d3.svg.axis().scale(xScale).orient('bottom').tickFormat(d3.format('d')),
+      // .tickSize(-body_height).tickPadding(5).ticks(d3.time.days, 1),
+      y_max = d3.max(records, function(d) { return d3.max(d); }),
+      yScale = d3.scale.linear().domain([0, y_max]).range([history_height, 0]),
+      yAxis = d3.svg.axis().scale(yScale).orient('left').tickFormat(d3.format('d'));
+
+    var color = d3.scale.category20();
+
+    svg.selectAll('g.history').remove();
+    var g = svg.append('g')
+      .attr('class', 'history')
+      .attr('width', history_width)
+      .attr('height', history_height)
+      .attr('transform', 'translate(' + 40 + ',' + (svg_height - history_height - 25) + ')');
+
+    // labels along bottom of chart
+    g.append('g')
+      .attr('class', 'x axis')
+      .attr('transform', 'translate(0,' + history_height + ')')
+      .call(xAxis)
+    // .append('text')
+    //   .attr('class', 'label')
+    //   .attr('x', body_width)
+    //   .attr('y', -6)
+    //   .style('text-anchor', 'end')
+    //   .text('hour by hour');
+
+    // vis.append('g')
+    //   .attr('class', 'x grid')
+    //   .call(xAxisDays)
+
+    // labels on left side of chart
+    g.append('g')
+      .attr('class', 'y axis')
+      .call(yAxis)
+    // .append('text')
+    //   .attr('class', 'label')
+    //   .attr('transform', 'rotate(-90)')
+    //   .attr('dy', '1em')
+    //   .style('text-anchor', 'end')
+    //   .text('per total words')
+
+    // vertical lines
+    // verts = vis.append('g')
+      // .attr('class', 'axis')
+      // .attr('width', 1440)
+      // .attr('height', 30)
+    // .append('g')
+      // .attr('transform', 'translate(0, 30)')
+      // .call(xAxis.ticks);
+    // window.xAxis = xAxis;
+
+    // console.log(records);
+    g.append('g')
+      .attr('class', 'inceptions')
+    .selectAll('path')
+      .data(records)
+    .enter().append('path')
+      // .attr('class', 'history')
+      .attr('stroke', function(d, i) { return color(i); })
+      .attr('fill', 'none')
+      .attr('d', d3.svg.line()
+        .x(function(d, i) { return xScale(i); }) // console.log(d, i);
+        .y(function(d, i) { return yScale(d); })
+      );
+  }
+});
+
+var world_records = [];
+
+var generator = new Generator();
+var svg;
+$('#reload').click(step);
+function step() {
+  generator.step();
+}
+persistence.on('ready', function() {
+  $('#chart').height(document.height - $('#controls').outerHeight(true) - 16).empty();
+  var width = $('#chart').width(),
+    height = $('#chart').height();
+  svg = d3.select('#chart').append('svg')
+    .attr('width', width)
+    .attr('height', height);
+  step();
+});
+$(document).on('keydown', function(ev) {
+  // newline: 32, space: 13
+  if (ev.which === 32 || ev.which === 13) {
+    generator.step();
+  }
+});
+
+</script>

@@ -1,0 +1,54 @@
+@import 'lib/css/normalize';
+
+body {
+  padding: 5px;
+  font-size: 80%;
+}
+#controls {
+  margin: 5px 0;
+}
+#chart {
+  border: 1px dotted #888;
+}
+input[type="text"] {
+  width: 5em;
+}
+fieldset {
+  legend {
+    text-transform: uppercase;
+    font-weight: bold;
+    font-size: 80%;
+  }
+  display: inline-block;
+  margin: 0 10px 0 0;
+}
+
+h4 { margin: 5px 0; }
+
+.axis path, .axis line {
+  fill: none;
+  stroke: #444;
+  shape-rendering: crispEdges;
+}
+.axis text {
+  font-size: 80%;
+}
+.grid line {
+  stroke: #999;
+  shape-rendering: crispEdges;
+}
+.grid path {
+  fill: none;
+  shape-rendering: crispEdges;
+}
+
+.node {
+  stroke: #fff;
+  stroke-width: 1.5px;
+}
+
+.link {
+  stroke: orange;
+  stroke-opacity: .5;
+}
+

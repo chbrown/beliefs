@@ -72,7 +72,7 @@ object PiExample extends App {
     }
   }
 
-  calculate(1000, 10000, 100000)
+  calculate(1000, 1000, 100000)
 
   // actors and messages ...
 
@@ -84,8 +84,7 @@ object PiExample extends App {
     val listener = akkaSystem.actorOf(Props[Listener], name = "listener")
 
     // create the master
-    val MasterT = new Master(nrOfWorkers, nrOfMessages, nrOfElements, listener)
-    val master = akkaSystem.actorOf(Props(MasterT), name = "master")
+    val master = akkaSystem.actorOf(Props(new Master(nrOfWorkers, nrOfMessages, nrOfElements, listener)), name = "master")
 
     // start the calculation
     master ! Calculate
