@@ -21,8 +21,13 @@
     <fieldset><legend>Transmission</legend>
       <label>Initially infected <input id="initial" value="1" type="text" data-persist title="Number of individuals initially infected." /></label>
       <label>Infectiousness <input id="infectiousness" value="0.7" type="text" data-persist title="Probability of an individual becoming infected by a single exposure." /></label>
+      <div style="padding-top: 4px">
+        <label><input type="radio" value="Disease" data-persist name="type" /> Disease</label> &nbsp;
+        <label><input type="radio" value="Idea" data-persist name="type" checked /> Idea</label> &nbsp; &nbsp;
+        <label>Threshold <input id="threshold" value="0.9" type="text" data-persist title="Threshold that an individual requires the probability of an incoming idea to be, based on how many times he's heard it and how believeable it is. Higher = more skpetical." /></label>
+      </div>
     </fieldset>
-    <fieldset><legend>Transmission</legend>
+    <fieldset><legend>Animation</legend>
       <label><input id="animate" type="checkbox" data-persist checked /> Animate Interval (ms)</label>
       <input id="interval" value="100" type="text" data-persist />
     </fieldset>
@@ -108,24 +113,48 @@ function generateWattsStrogatz(N, K, beta) {
   return {nodes: nodes, edges: edges};
 }
 
+var Infection = Backbone.Model.extend({
+  initialize: function(opts) {
+    this.name = opts.name;
+    this.infectiousness = opts.infectiousness;
+  },
+  toString: function() {
+    return 'Infection: ' + this.name + ' (' + this.infectiousness.toFixed(2) + ')';
+  }
+});
 
+var Idea = Backbone.Model.extend({
+  initialize: function(opts) {
+    this.name = opts.name;
+    this.believability = opts.believability;
+  },
+  toString: function() {
+    return 'Idea: ' + this.name + ' (' + this.believability.toFixed(2) + ')';
+  }
+});
 
 var Individual = Backbone.Model.extend({
+  threshold: 0.9,
   initialize: function(opts) {
     this.friends = [];
     // inbox is a dictionary whose keys are timesteps, and values are lists of Infections
     this.inbox = {};
     this.outbox = {};
+
+    // memory is a dictionary from the names of ideas to the number of time we've heard them.
+    this.memory = {};
+    if (opts.threshold)
+      this.threshold = opts.threshold;
   },
   // addFriend: function(friend) {
   //   if (friend !== this && _.excludes(this.friends, friend)) {
   //     this.friends.push(friend);
   //   }
   // },
-  receive: function(timestep, infection) {
+  receive: function(timestep, message) {
     if (this.inbox[timestep] === undefined) this.inbox[timestep] = [];
-    if (infection)
-      this.inbox[timestep].push(infection);
+    if (message)
+      this.inbox[timestep].push(message);
     // if (_.excludes(this.infections(), infection)) {
     //   // otherwise, contract with probability 1 -
     //   var rand_unif = Math.random();
@@ -138,11 +167,29 @@ var Individual = Backbone.Model.extend({
     if (!this.outbox[timestep]) {
       // inherit the old outbox directly if we have one
       var heeded = (this.outbox[timestep - 1] || []).slice(0);
-      this.inbox[timestep].forEach(function(infection) {
+
+      var infections = _.filter(this.inbox[timestep], function(message) { return message instanceof Infection; })
+      var ideas = _.filter(this.inbox[timestep], function(message) { return message instanceof Idea; })
+
+      // same analysis for infections
+      infections.forEach(function(infection) {
         if (Math.random() < infection.infectiousness) {
           heeded.push(infection);
         }
       });
+
+      // assume that all ideas have the same content for now.
+      var idea = ideas[0];
+      if (idea) {
+        this.memory[idea.name] = (this.memory[idea.name] || 0) + ideas.length;
+        var probability_of_believing = 1 - Math.pow((1 - idea.believability), this.memory[idea.name])
+        // xxx: assert that the personal threshold is 0.5
+        if (probability_of_believing > this.threshold) {
+          heeded.push(idea);
+        }
+      }
+      // console.log('Outbox:', timestep, '.', infections.length, 'infections,', ideas.length, 'ideas,', heeded.length, 'heeded.');
+
       // remove duplicates (can only have a disease once at a time)
       this.outbox[timestep] = _.uniq(heeded, function(message) {
         return message.name;
@@ -156,18 +203,13 @@ var Individual = Backbone.Model.extend({
   }
 });
 
-var Infection = Backbone.Model.extend({
-  initialize: function(opts) {
-    this.name = opts.name;
-    this.infectiousness = opts.infectiousness;
-  }
-});
-
 var Population = Backbone.Model.extend({
   initialize: function(opts) {
     // opts.nodes (list of integers) and opts.edges (list of pairs of integers) must be set
+    var threshold = parseFloat($('#threshold').val());
+
     var individuals = this.individuals = opts.nodes.map(function(i) {
-      return new Individual({});
+      return new Individual({threshold: threshold});
     });
     opts.edges.forEach(function(edge) {
       // the edges that generateWattsStrogatz returns are undirected
@@ -285,11 +327,13 @@ var Simulation = Backbone.Model.extend({
     this.population.individuals.forEach(function(individual) {
       individual.friends.forEach(function(friend) {
         // calculate what goes to all the friends' inboxes from this individuals' last outbox
-        individual.outboxAt(self.timestep - 1).forEach(function(infection) {
-          friend.receive(self.timestep, infection);
+        // it doesn't matter if they are infections or ideas, tell *everyone*
+        individual.outboxAt(self.timestep - 1).forEach(function(message) {
+          friend.receive(self.timestep, message);
         });
       });
-      // zero out his inbox
+      // zero out his inbox just to show that he's ready for the next slot, soon.
+      //   this is kind of hackish.
       individual.receive(self.timestep);
     });
     // at this point, all infections for the "timestamp" slot are finished.
@@ -304,10 +348,10 @@ var Simulation = Backbone.Model.extend({
   },
   // his tory: function() {
   //   var self = this;
-  //   // count and record current infections
+  //   // count and record current inf ections
   //   return _.range(this.timestep + 2).map(function(timestep) {
   //     return self.population.individuals.filter(function(individual) {
-  //       return individual.infections(timestep).length
+  //       return individual.infe ctions(timestep).length
   //     }).length;
   //   });
   // }
@@ -321,7 +365,7 @@ var Generator = Backbone.Model.extend({
   reset: function() {
     var N = constrain(2, parseInt($('#N').val(), 10), 100000);
     var K = parseInt($('#K').val(), 10);
-    var beta = parseFloat($('#beta').val(), 10);
+    var beta = parseFloat($('#beta').val());
     assert(!isNaN(N), "N must be a number!");
 
     // Watts and Strogatz
@@ -331,10 +375,15 @@ var Generator = Backbone.Model.extend({
     window.population = population;
 
     // start if off. patient zero(s).
-    var infectiousness = constrain(0, parseFloat($('#infectiousness').val()), 1.0);
-    var flu = new Infection({name: 'flu', infectiousness: infectiousness});
+    // transmittability = infectiousness = believability
+    var transmittability = constrain(0, parseFloat($('#infectiousness').val()), 1.0);
+    var flu = new Infection({name: 'flu', infectiousness: transmittability});
+    var rumor = new Idea({name: 'rumor', believability: transmittability});
     var initial = constrain(1, parseInt($('#initial').val(), 10), N);
     assert(!isNaN(initial), "Initially infected must be a number!");
+
+    var transmission_type = $('[name="type"]:checked').val();
+    // console.log('transmission_type', transmission_type);
 
     // just zero out the other individuals (sending nothing to the initial group doesn't change anything)
     population.individuals.forEach(function(individual) { individual.receive(0); });
@@ -347,7 +396,10 @@ var Generator = Backbone.Model.extend({
           break;
       }
       // console.log("Forcefully implanting/infecting", k, population.individuals[k]);
-      population.individuals[k].outbox[0] = [flu];
+      if (transmission_type === 'Disease')
+        population.individuals[k].outbox[0] = [flu];
+      else
+        population.individuals[k].outbox[0] = [rumor];
     }
 
     var interval_ms = constrain(10, parseInt($('#interval').val(), 10), 5000);
