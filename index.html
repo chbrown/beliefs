@@ -362,13 +362,6 @@ var Generator = Backbone.Model.extend({
     }
 
     this.simulation = new Simulation({population: population, visualize: this.visualize, svg: svg});
-    // this.simulation.on('saturated', function() {
-    //   clearInterval(self.animateInterval);
-    //   // self.records.push(self.simulation.his tory());
-    //   console.log("Saturated");
-    //   self.saturated = true;
-    //   self.next();
-    // });
   },
   step: function() {
     if (this.simulation === undefined || this.simulation.total) {
@@ -376,8 +369,8 @@ var Generator = Backbone.Model.extend({
       if (this.animate) {
         clearInterval(this.animateInterval);
       }
-      this.records.push([]);
       this.reset();
+      this.records.push([this.simulation.population.activeIndividuals(0).length]);
     }
     else {
       var infected = this.simulation.step();
@@ -392,7 +385,7 @@ var Generator = Backbone.Model.extend({
     var history_width = svg_width - 80, history_height = this.visualize ? 180 : svg_height - 40;
     // body_width = svg_width - (margins.left + margins.right),
     // body_height = svg_height - (margins.top + margins.bottom);
-    window.records = records;
+    // window.records = records;
 
     var x_max = d3.max(records, function(d) { return d.length; }),
       xScale = d3.scale.linear().domain([0, x_max]).range([0, history_width]),
