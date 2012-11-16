@@ -14,17 +14,17 @@
 <div id="container">
   <div id="controls">
     <fieldset><legend>Graph generation</legend>
-      <label>N <input id="N" value="100" type="text" data-persist title="Cardinality of population" /></label>
-      <label>K <input id="K" value="7" type="text" data-persist title="Mean degree" /></label>
-      <label>β <input id="beta" value="0.5" type="text" data-persist title="Randomness of graph" /></label>
+      <label>N <input id="N" value="50" type="text" data-persist title="Cardinality of population" /></label>
+      <label>K <input id="K" value="5" type="text" data-persist title="Mean degree" /></label>
+      <label>β <input id="beta" value="0.3" type="text" data-persist title="Randomness of graph" /></label>
     </fieldset>
     <fieldset><legend>Transmission</legend>
       <label>Initially infected <input id="initial" value="1" type="text" data-persist title="Number of individuals initially infected." /></label>
-      <label>Infectiousness <input id="infectiousness" value="0.8" type="text" data-persist title="Probability of an individual becoming infected by a single exposure." /></label>
+      <label>Infectiousness <input id="infectiousness" value="0.7" type="text" data-persist title="Probability of an individual becoming infected by a single exposure." /></label>
     </fieldset>
     <!-- <label>Iterations <input id="iterations" value="100" type="text" data-persist /></label> -->
-    <label><input id="animate" type="checkbox" data-persist /> Animate</label><!-- checked="checked" -->
-    <label><input id="visualize" type="checkbox" data-persist /> Visualize</label><!-- checked="checked" -->
+    <label><input id="animate" type="checkbox" data-persist checked /> Animate</label><!-- checked="checked" -->
+    <label><input id="visualize" type="checkbox" data-persist checked /> Visualize</label><!-- checked="checked" -->
     <button id="reload">Reload</button>
   </div>
   <div id="content">
@@ -67,7 +67,6 @@ var Individual = Backbone.Model.extend({
     if (_.excludes(this.infections(), infection)) {
       // otherwise, contract with probability 1 -
       var rand_unif = Math.random();
-      // console.log(rand_unif, rand_unif < infection.infectiousness);
       if (rand_unif < infection.infectiousness) {
         this.inceptions.push({infection: infection, timestep: timestep});
       }
@@ -212,7 +211,6 @@ var Simulation = Backbone.Model.extend({
     // mostly from http://bl.ocks.org/4062045
     this.width = parseInt(svg.attr('width'), 10);
     this.height = parseInt(svg.attr('height'), 10);
-    // console.log(svg, width, height, nodes, links)
 
     this.force = d3.layout.force()
       .size([this.width, this.height])
@@ -314,7 +312,6 @@ var Generator = Backbone.Model.extend({
 
     // Watts and Strogatz
     var graph = generateWattsStrogatz(N, K, beta);
-    console.log(N, K, beta, graph);
     // graph.nodes and graph.edges are now set correctly
     var population = new Population(graph);
 
@@ -325,7 +322,6 @@ var Generator = Backbone.Model.extend({
     constrain(1, initial, N);
     assert(!isNaN(initial), "Initially infected must be a number!");
     //   give up after 100 tries
-    console.log('initial', initial);
     for (var i = 0; i < initial; i++) {
       var k;
       for (var j = 0; j < 100; j++) {
@@ -342,7 +338,7 @@ var Generator = Backbone.Model.extend({
     if (this.animate) {
       this.animateInterval = setInterval(function() {
         self.step();
-      }, this.visualize ? 250 : 10);
+      }, this.visualize ? 500 : 10);
     }
 
     this.simulation = new Simulation({population: population, visualize: this.visualize, svg: svg});
@@ -391,44 +387,15 @@ var Generator = Backbone.Model.extend({
       .attr('height', history_height)
       .attr('transform', 'translate(' + 40 + ',' + (svg_height - history_height - 25) + ')');
 
-    // labels along bottom of chart
     g.append('g')
       .attr('class', 'x axis')
       .attr('transform', 'translate(0,' + history_height + ')')
       .call(xAxis)
-    // .append('text')
-    //   .attr('class', 'label')
-    //   .attr('x', body_width)
-    //   .attr('y', -6)
-    //   .style('text-anchor', 'end')
-    //   .text('hour by hour');
 
-    // vis.append('g')
-    //   .attr('class', 'x grid')
-    //   .call(xAxisDays)
-
-    // labels on left side of chart
     g.append('g')
       .attr('class', 'y axis')
       .call(yAxis)
-    // .append('text')
-    //   .attr('class', 'label')
-    //   .attr('transform', 'rotate(-90)')
-    //   .attr('dy', '1em')
-    //   .style('text-anchor', 'end')
-    //   .text('per total words')
 
-    // vertical lines
-    // verts = vis.append('g')
-      // .attr('class', 'axis')
-      // .attr('width', 1440)
-      // .attr('height', 30)
-    // .append('g')
-      // .attr('transform', 'translate(0, 30)')
-      // .call(xAxis.ticks);
-    // window.xAxis = xAxis;
-
-    // console.log(records);
     g.append('g')
       .attr('class', 'inceptions')
     .selectAll('path')
@@ -438,7 +405,7 @@ var Generator = Backbone.Model.extend({
       .attr('stroke', function(d, i) { return color(i); })
       .attr('fill', 'none')
       .attr('d', d3.svg.line()
-        .x(function(d, i) { return xScale(i); }) // console.log(d, i);
+        .x(function(d, i) { return xScale(i); })
         .y(function(d, i) { return yScale(d); })
       );
   }
