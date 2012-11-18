@@ -54,6 +54,8 @@
 <script>
 // implement:
 // http://en.wikipedia.org/wiki/Barab%C3%A1si%E2%80%93Albert_model
+// http://www.drdobbs.com/architecture-and-design/simulating-small-world-networks/184405611
+// http://chianti.ucsd.edu/svn/csplugins/trunk/soc/pjmcswee/src/cytoscape/randomnetwork/BarabasiAlbertModel.java
 
 // also: Erdos-Renyi (ER) model:
 // start with N nodes and connect every pair of nodes with probability p, creating a graph with approximately pN(N − 1)/2 edges
@@ -142,32 +144,60 @@ Graph.WattsStrogatz = function(N, K, beta) {
   return new Graph(nodes, edges);
 }
 
-Graph.BarabasiAlbert = function(N, m0) {
+// give this a list of numbers (in a constant order)
+// sum = partitions.sum
+function sampleFromPartitioning(partitions, sum) {
+  var top = 0, rand = Math.random() * sum, i;
+  for (i = 0; i < partitions.length; i++) {
+    top += partitions[i];
+    if (rand < top) {
+      return i;
+    }
+  }
+  return partitions.length - 1;
+}
+
+Graph.BarabasiAlbert = function(N, m0, m) {
   assert(m0 >= 2, 'm0 ≥ 2 violated!');
+  assert(m >= 1, 'm ≥ 1 violated!');
   var degrees = _.rep(N, 0);
   var edge_dict = {};
 
   var degree_sum = 0;
   // make a complete network of all the nodes in the initial m0 network
-  // xxx: add parameter for initial degree
-  for (var a = 0; a < m0; a++) {
-    for (var b = a + 1; b < m0; b++) {
-      edge_dict[[a, b]] = 1;
-      degrees[a]++;
-      degrees[b]++;
+  // xxx: add parameter for initial degree?
+  for (var i = 0; i < m0; i++) {
+    // candidates for friendship are all the nodes that have come before me.
+    var candidates = _.range(i); // a list of indices (names) of nodes
+    for (var c = 0; c < m && candidates.length; c++) {
+      // partitions is a list of nodes describing
+      var partitions = candidates.map(function(candidate) { return degrees[candidate]; });
+      var j = sampleFromPartitioning(partitions, degree_sum);
+      // console.log("initializing", i, c, partitions, degree_sum, j);
+      candidates.removeAt(j);
+
+      edge_dict[[i, j]] = 1;
+      degrees[i]++;
+      degrees[j]++;
       degree_sum += 2;
     }
   }
+  // console.log(edge_dict);
 
   for (var i = m0; i < N; i++) {
-    for (var j = 0; j < i; j++) {
-      var p = degrees[j] / degree_sum;
-      if (Math.random() < p) {
-        edge_dict[[j, i]] = 1;
-        degrees[i]++;
-        degrees[j]++;
-        degree_sum += 2;
-      }
+    // i is the new node
+
+    var candidates = _.range(i);
+    for (var c = 0; c < m && candidates.length; c++) {
+      // partitions is a list of nodes describing
+      var partitions = candidates.map(function(candidate) { return degrees[candidate]; });
+      var j = sampleFromPartitioning(partitions, degree_sum);
+      candidates.removeAt(j);
+
+      edge_dict[[i, j]] = 1;
+      degrees[i]++;
+      degrees[j]++;
+      degree_sum += 2;
     }
   }
 
@@ -339,6 +369,7 @@ var Simulation = Backbone.Model.extend({
       .links(links)
       .start();
 
+    // $(svg).empty()
     svg.selectAll('g.network').remove();
     var g = svg.append('g')
       .attr('class', 'network');
@@ -352,7 +383,7 @@ var Simulation = Backbone.Model.extend({
         .data(nodes)
       .enter().append('circle')
         .attr('class', 'node')
-        .call(this.force.drag);
+        // .call(this.force.drag);
     // node.append('title')
         // .text(function(d) { return d.name; });
 
