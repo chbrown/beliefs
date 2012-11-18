@@ -14,9 +14,19 @@
 <div id="container">
   <div id="controls">
     <fieldset><legend>Graph generation</legend>
-      <label>N <input id="N" value="50" type="text" data-persist title="Cardinality of population" /></label>
-      <label>K <input id="K" value="5" type="text" data-persist title="Mean degree" /></label>
-      <label>β <input id="beta" value="0.3" type="text" data-persist title="Randomness of graph" /></label>
+      <select data-persist id="graph">
+        <option value="watts-strogatz">Watts-Strogatz</option>
+        <option value="barabasi-albert" selected>Barabási–Albert</option>
+      </select>
+      <div id="watts-strogatz">
+        <div><label>N <input id="N" value="50" type="text" data-persist title="Population" /></label></div>
+        <div><label>K <input id="K" value="5" type="text" data-persist title="Mean degree" /></label></div>
+        <div><label>β <input id="beta" value="0.3" type="text" data-persist title="Randomness of graph" /></label></div>
+      </div>
+      <div id="barabasi-albert">
+        <div><label>N <input id="N" value="50" type="text" data-persist title="Cardinality of population" /></label></div>
+        <div><label>m0 <input id="m0" value="5" type="text" data-persist title="Mean degree" /></label></div>
+      </div>
     </fieldset>
     <fieldset><legend>Transmission</legend>
       <label>Initially infected <input id="initial" value="1" type="text" data-persist title="Number of individuals initially infected." /></label>
@@ -42,8 +52,20 @@
 
 
 <script>
-// finish with jquery.persistance.js
+// implement:
+// http://en.wikipedia.org/wiki/Barab%C3%A1si%E2%80%93Albert_model
+
+// also: Erdos-Renyi (ER) model:
+// start with N nodes and connect every pair of nodes with probability p, creating a graph with approximately pN(N − 1)/2 edges
+
 _.excludes = function() { return !_.contains.apply(_, arguments); }
+_.rep = function(n, value) {
+  var values = new Array(n);
+  for (var i = 0; i < n; i++) {
+    values[i] = value;
+  }
+  return values;
+}
 function constrain(min, x, max) { return Math.max(min, Math.min(max, x)); }
 function assert(condition, message) { if (!condition) throw new Error(message); }
 Array.prototype.remove = function(item) {
@@ -62,17 +84,23 @@ Array.prototype.removeAt = function(index) {
 function pairSort(pair) {
   return (pair[0] < pair[1]) ? pair : [pair[1], pair[0]];
 }
-function generateWattsStrogatz(N, K, beta) {
+function Graph(nodes, edges) {
+  // nodes is always a list of integers
+  this.nodes = nodes;
+  // edges is always a list of pairs of integers
+  this.edges = edges;
+}
+Graph.WattsStrogatz = function(N, K, beta) {
   assert(0 <= beta && beta <= 1, '0 ≤ β ≤ 1 violated!');
   // console.log('Generating Watts Strogatz small world graph', [N, K, Math.log(N), 1].join(' >> '), '| β =', beta);
   var nodes = _.range(N);
-  var edges = {};
+  var edgedict = {};
 
   // create ring lattice
   for (var a = 0; a < N; a++) {
     for (var j = 0; j < (K / 2); j++) {
       var b = (a + j + 1) % N;
-      edges[pairSort([a, b])] = 1;
+      edgedict[pairSort([a, b])] = 1;
     }
   }
 
@@ -80,14 +108,14 @@ function generateWattsStrogatz(N, K, beta) {
     // a < b, guaranteed
     var a = edge[0], b = edge[1];
     // remove the a->b link
-    delete edges[edge];
+    delete edgedict[edge];
     // find a new edge to make, that doesn't already exist
     //   give up after 100 tries
     for (var i = 0, new_b, new_edge; i < 100; i++) {
       new_b = Math.random() * N | 0;
       new_edge = pairSort([a, new_b]);
-      if (edges[new_edge] === undefined && a !== new_b) {
-        edges[new_edge] = 1;
+      if (edgedict[new_edge] === undefined && a !== new_b) {
+        edgedict[new_edge] = 1;
         break;
       }
     }
@@ -99,19 +127,59 @@ function generateWattsStrogatz(N, K, beta) {
       var b = (a + j + 1) % N;
       if (Math.random() < beta) {
         // rewire! i.e. replace b with some other node on the graph that a is not already connected to.
-        rewire([a, b]);
+        rewire(pairSort([a, b]));
       }
     }
   }
 
   // edges is undirected, and edges[x] = [a, b] will have a < b for all x
-  var edges = Object.keys(edges).map(function(edge_string) {
+  var edges = Object.keys(edgedict).map(function(edge_string) {
     return edge_string.split(',').map(function(part) {
       return parseInt(part, 10);
     });
   });
-  return {nodes: nodes, edges: edges};
+
+  return new Graph(nodes, edges);
 }
+
+Graph.BarabasiAlbert = function(N, m0) {
+  assert(m0 >= 2, 'm0 ≥ 2 violated!');
+  var degrees = _.rep(N, 0);
+  var edge_dict = {};
+
+  var degree_sum = 0;
+  // make a complete network of all the nodes in the initial m0 network
+  // xxx: add parameter for initial degree
+  for (var a = 0; a < m0; a++) {
+    for (var b = a + 1; b < m0; b++) {
+      edge_dict[[a, b]] = 1;
+      degrees[a]++;
+      degrees[b]++;
+      degree_sum += 2;
+    }
+  }
+
+  for (var i = m0; i < N; i++) {
+    for (var j = 0; j < i; j++) {
+      var p = degrees[j] / degree_sum;
+      if (Math.random() < p) {
+        edge_dict[[j, i]] = 1;
+        degrees[i]++;
+        degrees[j]++;
+        degree_sum += 2;
+      }
+    }
+  }
+
+  // edges is undirected, and edges[x] = [a, b] will have a < b for all x
+  var edges = Object.keys(edge_dict).map(function(edge_string) {
+    return edge_string.split(',').map(function(part) {
+      return parseInt(part, 10);
+    });
+  });
+  return new Graph(_.range(N), edges);
+}
+
 
 var Infection = Backbone.Model.extend({
   initialize: function(opts) {
@@ -369,7 +437,8 @@ var Generator = Backbone.Model.extend({
     assert(!isNaN(N), "N must be a number!");
 
     // Watts and Strogatz
-    var graph = generateWattsStrogatz(N, K, beta);
+    // var graph = Graph.WattsStrogatz(N, K, beta);
+    var graph = Graph.BarabasiAlbert(N, K, beta);
     // graph.nodes and graph.edges are now set correctly
     var population = new Population(graph);
     window.population = population;
