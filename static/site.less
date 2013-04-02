@@ -7,7 +7,8 @@ body {
 #controls {
   margin: 5px 0;
 }
-#chart {
+#content {
+  margin: 5px 0 0;
   border: 1px dotted #888;
 }
 input[type="text"] {
@@ -21,6 +22,29 @@ fieldset {
   }
   display: inline-block;
   margin: 0 10px 0 0;
+}
+.block-labels {
+  label {
+    display: block;
+  }
+}
+.vertical-labels {
+  .block-labels;
+  label {
+    margin: 2px 0;
+    span {
+      min-width: 24px;
+    }
+  }
+}
+.horizontal-labels {
+  label {
+    display: inline-block;
+    margin: 0 2px;
+    span {
+      padding: 0 1px;
+    }
+  }
 }
 
 h4 { margin: 5px 0; }

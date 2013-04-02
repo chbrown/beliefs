@@ -1,0 +1,36 @@
+\documentclass[11pt]{article}
+\usepackage[pdftex]{graphicx}
+\usepackage{henrian-basic}
+\usepackage{textcomp}
+\usepackage{times}
+
+\usepackage[margin=1in,paperwidth=8.5in,paperheight=11in,includefoot,includehead]{geometry}
+
+\usepackage{hyperref}
+
+\author{Christopher Brown}
+\title{Belief contagion simulation}
+\makeHeaders{Belief contagion simulation}
+
+\newcommand\cgraphics[2][]{\centerline{\includegraphics[#1]{#2}}}
+
+\begin{document}
+\maketitle
+
+\section{Akka}
+
+Akka is a Scala library for message-oriented programming. Message passing is a common way to abstract over thread-sharing and memory-sharing, and Akka provides a high-level interface so that I, the programmer, do not have to work directly with the MPI (Message Passing Interface) specification, or with network details. In Akka, every entity is an ``actor,'' i.e., an object that is built to respond to incoming messages, with the ability to send outgoing messages.
+
+This is a rich interface for the simulations we have been discussing because it replicates human autonomy to some degree. For example: I have contact information for my friends, and I can send them messages, and they can send me messages, but I can't directly control them. Passing messages around an Akka network feels natural; every actor receives messages and can choose how to respond based on its own internal state. But the actor does not have access to the senders' internal state, which would be a disadvantage in some modeling scenarios, but it is an apt simplification in this one.
+
+However, there are a few complications. Everything is evented---based on message passing. There is no way to say, ``finish sending all your messages and let me know when you're done.'' For example, to simulate a succession of days (avoiding messages suddenly getting received `days' after they were sent), you must create an artificial bottleneck. There must be a controller to send out $N$ \emph{wake-up} messages (for N believer-simulators), and wait for $N$ \emph{done} messages, only proceeding to the next step after receiving all messages.
+Akka provides two types of message passing: normal send-and-forget messages (\texttt{!}) and futures (\texttt{!}).
+I only used the normal, more basic type of message. Using futures may alleviate some of the accounting that has to be kept to enforce some level of synchony. I think the overall consensus is that for the smaller-scale models we're exploring at the moment, Akka is overkill, and the black-box effects of message-passing programming are not worth the performance/scalability benefits.
+
+\section{Visualization}
+
+The webpage project has two main goals. First, to visualize the different structures that are popular in the literature (e.g., Watts-Strogatz's `small-world', Barab\'asi–Albert). Second, to allow changing variables and immediately seeing the effect on the way ``beliefs'' or ``diseases'' propogate on the graph.
+
+
+
+\end{document}

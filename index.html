@@ -5,53 +5,247 @@
 <script>var started = new Date();</script>
 <link href="/static/site.css" rel="stylesheet" type="text/css" />
 <script src="/static/lib/js/jquery.js"></script>
-<script src="/static/lib/js/jquery.persistance.js"></script>
+<!-- <script src="/static/lib/js/jquery.persistance.js"></script> -->
 <script src="/static/lib/js/backbone_pkg.js"></script>
 <script src="/static/lib/js/d3.v2.js"></script>
 <script src="/static/lib/js/date.js"></script>
-<script src="/static/local.js"></script>
+<script src="/static/graphs.js"></script>
+<!-- <script src="/static/jstat-1.0.0.min.js"></script> -->
+<script src="/static/random.js"></script>
+
+<script type="text/html" id="watts-strogatz">
+  <label><span>N</span> <input id="N" type="text" title="Population" /></label>
+  <label><span>K</span> <input id="K" type="text" title="Mean degree" /></label>
+  <label><span>β</span> <input id="beta" type="text" title="Randomness of graph" /></label>
+</script>
+
+<script type="text/html" id="barabasi-albert">
+  <label><span>N</span> <input id="N" type="text" title="Population" /></label>
+  <label><span>m0</span> <input id="m0" type="text" /></label>
+  <label><span>m</span> <input id="m" type="text" title="Mean connectedness" /></label>
+</script>
+
+<script type="text/html" id="disease">
+  <label>Seed size
+    <input id="seed_size" type="text" title="Number of initially active individuals." />
+  </label>
+  <label>Types
+    <input id="types"type="text" title="Types of diseases." />
+  </label>
+  <label>Infectiousness
+    <input id="infectiousness" type="text" />
+  </label>
+  <!-- Ending criteria ??? -->
+</script>
+
+<script type="text/html" id="idea">
+  <label>Seed size
+    <input id="seed_size" type="text" title="Number of initially active individuals." />
+  </label>
+  <label>Types
+    <input id="types"type="text" title="Types of ideas." />
+  </label>
+  <label>Threshold
+    <input id="threshold" type="text" />
+  </label>
+  <label>Probability idea is true
+    <input id="idea_p_true" type="text" />
+  </label>
+  <label><input id="memory" type="checkbox" /> Memory</label>
+</script>
 
 <div id="container">
-  <div id="controls">
-    <fieldset><legend>Graph generation</legend>
-      <select data-persist id="graph">
-        <option value="watts-strogatz">Watts-Strogatz</option>
-        <option value="barabasi-albert" selected>Barabási–Albert</option>
-      </select>
-      <div id="watts-strogatz">
-        <div><label>N <input id="N" value="50" type="text" data-persist title="Population" /></label></div>
-        <div><label>K <input id="K" value="5" type="text" data-persist title="Mean degree" /></label></div>
-        <div><label>β <input id="beta" value="0.3" type="text" data-persist title="Randomness of graph" /></label></div>
-      </div>
-      <div id="barabasi-albert">
-        <div><label>N <input id="N" value="50" type="text" data-persist title="Cardinality of population" /></label></div>
-        <div><label>m0 <input id="m0" value="5" type="text" data-persist title="Mean degree" /></label></div>
+
+  <div id="configuration">
+    <fieldset>
+      <legend>Graph generator:
+        <select id="graph-generator">
+          <option value="watts-strogatz">Watts-Strogatz</option>
+          <option value="barabasi-albert">Barabási–Albert</option>
+        </select>
+      </legend>
+      <div class="horizontal-labels"></div>
+    </fieldset>
+    <fieldset>
+      <legend>Transmission type:
+        <select id="type">
+          <option value="disease">Disease</option>
+          <option value="idea">Idea</option>
+        </select>
+      </legend>
+      <div class="horizontal-labels"></div>
+    </fieldset>
+    <fieldset>
+      <legend>Animation</legend>
+      <div class="horizontal-labels">
+        <label><input id="iterate_automatically" type="checkbox" /> Iterate automatically</label>
+        <label><input id="interval_ms" type="text" /> Speed (ms)</label>
+        <label><input id="visualize" type="checkbox" checked /> Visualize</label>
       </div>
     </fieldset>
-    <fieldset><legend>Transmission</legend>
-      <label>Initially infected <input id="initial" value="1" type="text" data-persist title="Number of individuals initially infected." /></label>
-      <label>Infectiousness <input id="infectiousness" value="0.3" type="text" data-persist title="Probability of an individual becoming infected by a single exposure." /></label>
-      <div style="padding-top: 4px">
-        <label><input type="radio" value="Disease" data-persist name="type" /> Disease</label> &nbsp;
-        <label><input type="radio" value="Idea" data-persist name="type" checked /> Idea</label> &nbsp; &nbsp;
-        <label>Threshold <input id="threshold" value="0.9" type="text" data-persist title="Threshold that an individual requires the probability of an incoming idea to be, based on how many times he's heard it and how believeable it is. Higher = more skpetical." /></label>
-      </div>
-    </fieldset>
-    <fieldset><legend>Animation</legend>
-      <label><input id="animate" type="checkbox" data-persist checked /> Animate Interval (ms)</label>
-      <input id="interval" value="300" type="text" data-persist />
-    </fieldset>
-    <label><input id="visualize" type="checkbox" data-persist checked /> Visualize</label>
-    <button id="reload">Reload</button>
   </div>
-  <div id="content">
-    <div id="chart">
-    </div>
-  </div>
+
+  <div id="content"></div>
 </div>
 
 
+
 <script>
+function constrain(min, x, max) { return Math.max(min, Math.min(max, x)); }
+function assert(condition, message) { if (!condition) throw new Error(message); }
+function maybeParseNumber(string) {
+  if (string.match(/^\d*\.\d*$/))
+    return parseFloat(string);
+  else if (string.match(/^\d+$/))
+    return parseInt(string, 10);
+  return string;
+}
+
+var Configuration = Backbone.Model.extend({
+  initialize: function(opts) {
+    this.on('change', function() {
+      Configuration.saveQuerystring(this.toJSON());
+    }, this);
+  },
+  getBool: function(attribute) {
+    return Configuration.asBool(this.get(attribute));
+  },
+  getFunction: function(attribute) {
+    return Configuration.asFunction(this.get(attribute));
+  },
+  toNumberJSON: function() {
+    var obj = this.toJSON();
+    for (var key in obj) {
+      var string = obj[key];
+      if (string instanceof String) {
+        obj[key] = maybeParseNumber(string);
+      }
+    }
+    return obj;
+  }
+}, {
+  asBool: function(value) {
+    if (value === true || value === false)
+      return value;
+    return (value + '') === 'true';
+  },
+  asFunction: function(string) {
+    var func_match = string.match(/(.+)\((.+)\)/);
+    if (func_match) {
+      var func = window[func_match[1]];
+      var args = func_match[2].split(/,\s*/).map(maybeParseNumber);
+      // xxx: ensure func and args are good here, i.e. that args.length == func.length
+      if (func === undefined)
+        throw new Error('You must specify a function that exists in the global context.');
+      if (func.apply === undefined)
+        throw new Error('You must specify a function to call; ' + func + ' has no "apply" method.');
+      if (func.length !== args.length)
+        throw new Error('You must specify exactly as many arguments as the function requires.');
+
+      return function() {
+        return func.apply(null, args);
+      };
+    }
+    else {
+      var value = maybeParseNumber(string);
+      return function() {
+        return value;
+      }
+    }
+  },
+  loadQuerystring: function() {
+    return _.object(location.search.slice(1).split('&').map(function(item) {
+      var pair = item.split(/=/);
+      var key = decodeURIComponent(pair[0]);
+      var value = decodeURIComponent(pair[1]);
+      return [key, value];
+    }));
+  },
+  saveQuerystring: function(hash) {
+    var querystring = '?' + _.map(hash, function(val, key) {
+      return encodeURIComponent(key) + '=' + encodeURIComponent(val);
+    }).join('&');
+    // todo: use replaceState if the only change from the last persist was the variable that was last change
+    history.pushState({}, "[title]", '/' + querystring);
+  }
+});
+
+var DynamicFieldset = Backbone.View.extend({
+  initialize: function(opts) {
+    // opts.model, opts.key
+    this.$select = this.$('select');
+    opts.model.on('change:' + opts.key, function(model, value) {
+      this.$select.val(value);
+      var html = $('#' + value).html();
+      this.$('div').html(html);
+      this.$('input').each(function() {
+        this.value = opts.model.get(this.id);
+      });
+    }, this);
+  }
+});
+
+var ConfigurationView = Backbone.View.extend({
+  initialize: function(opts) {
+    // this.name = opts.name;
+    // this.infectiousness = opts.infectiousness;
+    new DynamicFieldset({
+      model: opts.model,
+      el: this.$('#graph-generator').closest('fieldset'),
+      key: 'graph-generator'
+    });
+    new DynamicFieldset({
+      model: opts.model,
+      el: this.$('#type').closest('fieldset'),
+      key: 'type'
+    });
+
+    opts.model.on('change', function(model) {
+      var self = this;
+      _.each(model.changed, function(val, key) {
+        if (key) {
+          var $input = self.$('#' + key);
+          var type = $input.attr('type');
+
+          if (_.contains(['checkbox', 'radio'], type)) {
+            $input.prop('checked', Configuration.asBool(val));
+          }
+          else {
+            $input.val(val);
+          }
+        }
+      });
+    }, this);
+  },
+  events: {
+    'keyup input': function(ev) {
+      this.model.set(ev.target.id, ev.target.value);
+    },
+    'change select': function(ev) {
+      this.model.set(ev.target.id, ev.target.value);
+    },
+    'change input[type="checkbox"]': function(ev) {
+      this.model.set(ev.target.id, ev.target.checked);
+    }
+  }
+});
+
+var config = new Configuration();
+var config_view = new ConfigurationView({
+  el: $('#configuration'),
+  model: config
+});
+
+var defaults = {
+  "graph-generator": 'watts-strogatz', N: 50, K: 5, beta: 0.3, m0: 2, m: 1,
+  type: 'disease', seed_size: 1, types: 1,
+  infectiousness: 0.33, idea_p_true: 0.66,
+  threshold: 'rbeta(1.5, 2)', interval_ms: 300, visualize: true };
+
+var querystring_hash = Configuration.loadQuerystring();
+config.set(_.extend(defaults, querystring_hash));
+
+// config.trigger('change:graph-generator')
 // implement:
 // http://en.wikipedia.org/wiki/Barab%C3%A1si%E2%80%93Albert_model
 // http://www.drdobbs.com/architecture-and-design/simulating-small-world-networks/184405611
@@ -59,157 +253,6 @@
 
 // also: Erdos-Renyi (ER) model:
 // start with N nodes and connect every pair of nodes with probability p, creating a graph with approximately pN(N − 1)/2 edges
-
-_.excludes = function() { return !_.contains.apply(_, arguments); }
-_.rep = function(n, value) {
-  var values = new Array(n);
-  for (var i = 0; i < n; i++) {
-    values[i] = value;
-  }
-  return values;
-}
-function constrain(min, x, max) { return Math.max(min, Math.min(max, x)); }
-function assert(condition, message) { if (!condition) throw new Error(message); }
-Array.prototype.remove = function(item) {
-  // allow removing slices or single objects
-  var index = this.indexOf(item);
-  if (index !== -1)
-    return this.removeAt(index);
-};
-// Array removeAt - By John Resig (MIT Licensed)
-Array.prototype.removeAt = function(index) {
-  var rest = this.slice(index + 1 || this.length);
-  this.length = index < 0 ? this.length + index : index;
-  return this.push.apply(this, rest);
-};
-
-function pairSort(pair) {
-  return (pair[0] < pair[1]) ? pair : [pair[1], pair[0]];
-}
-function Graph(nodes, edges) {
-  // nodes is always a list of integers
-  this.nodes = nodes;
-  // edges is always a list of pairs of integers
-  this.edges = edges;
-}
-Graph.WattsStrogatz = function(N, K, beta) {
-  assert(0 <= beta && beta <= 1, '0 ≤ β ≤ 1 violated!');
-  // console.log('Generating Watts Strogatz small world graph', [N, K, Math.log(N), 1].join(' >> '), '| β =', beta);
-  var nodes = _.range(N);
-  var edgedict = {};
-
-  // create ring lattice
-  for (var a = 0; a < N; a++) {
-    for (var j = 0; j < (K / 2); j++) {
-      var b = (a + j + 1) % N;
-      edgedict[pairSort([a, b])] = 1;
-    }
-  }
-
-  var rewire = function(edge) {
-    // a < b, guaranteed
-    var a = edge[0], b = edge[1];
-    // remove the a->b link
-    delete edgedict[edge];
-    // find a new edge to make, that doesn't already exist
-    //   give up after 100 tries
-    for (var i = 0, new_b, new_edge; i < 100; i++) {
-      new_b = Math.random() * N | 0;
-      new_edge = pairSort([a, new_b]);
-      if (edgedict[new_edge] === undefined && a !== new_b) {
-        edgedict[new_edge] = 1;
-        break;
-      }
-    }
-  };
-
-  // do rewirings
-  for (var a = 0; a < N; a++) {
-    for (var j = 0; j < (K / 2); j++) {
-      var b = (a + j + 1) % N;
-      if (Math.random() < beta) {
-        // rewire! i.e. replace b with some other node on the graph that a is not already connected to.
-        rewire(pairSort([a, b]));
-      }
-    }
-  }
-
-  // edges is undirected, and edges[x] = [a, b] will have a < b for all x
-  var edges = Object.keys(edgedict).map(function(edge_string) {
-    return edge_string.split(',').map(function(part) {
-      return parseInt(part, 10);
-    });
-  });
-
-  return new Graph(nodes, edges);
-}
-
-// give this a list of numbers (in a constant order)
-// sum = partitions.sum
-function sampleFromPartitioning(partitions, sum) {
-  var top = 0, rand = Math.random() * sum, i;
-  for (i = 0; i < partitions.length; i++) {
-    top += partitions[i];
-    if (rand < top) {
-      return i;
-    }
-  }
-  return partitions.length - 1;
-}
-
-Graph.BarabasiAlbert = function(N, m0, m) {
-  assert(m0 >= 2, 'm0 ≥ 2 violated!');
-  assert(m >= 1, 'm ≥ 1 violated!');
-  var degrees = _.rep(N, 0);
-  var edge_dict = {};
-
-  var degree_sum = 0;
-  // make a complete network of all the nodes in the initial m0 network
-  // xxx: add parameter for initial degree?
-  for (var i = 0; i < m0; i++) {
-    // candidates for friendship are all the nodes that have come before me.
-    var candidates = _.range(i); // a list of indices (names) of nodes
-    for (var c = 0; c < m && candidates.length; c++) {
-      // partitions is a list of nodes describing
-      var partitions = candidates.map(function(candidate) { return degrees[candidate]; });
-      var j = sampleFromPartitioning(partitions, degree_sum);
-      // console.log("initializing", i, c, partitions, degree_sum, j);
-      candidates.removeAt(j);
-
-      edge_dict[[i, j]] = 1;
-      degrees[i]++;
-      degrees[j]++;
-      degree_sum += 2;
-    }
-  }
-  // console.log(edge_dict);
-
-  for (var i = m0; i < N; i++) {
-    // i is the new node
-
-    var candidates = _.range(i);
-    for (var c = 0; c < m && candidates.length; c++) {
-      // partitions is a list of nodes describing
-      var partitions = candidates.map(function(candidate) { return degrees[candidate]; });
-      var j = sampleFromPartitioning(partitions, degree_sum);
-      candidates.removeAt(j);
-
-      edge_dict[[i, j]] = 1;
-      degrees[i]++;
-      degrees[j]++;
-      degree_sum += 2;
-    }
-  }
-
-  // edges is undirected, and edges[x] = [a, b] will have a < b for all x
-  var edges = Object.keys(edge_dict).map(function(edge_string) {
-    return edge_string.split(',').map(function(part) {
-      return parseInt(part, 10);
-    });
-  });
-  return new Graph(_.range(N), edges);
-}
-
 
 var Infection = Backbone.Model.extend({
   initialize: function(opts) {
@@ -224,47 +267,48 @@ var Infection = Backbone.Model.extend({
 var Idea = Backbone.Model.extend({
   initialize: function(opts) {
     this.name = opts.name;
-    this.believability = opts.believability;
+    this.p_true = opts.p_true;
   },
   toString: function() {
-    return 'Idea: ' + this.name + ' (' + this.believability.toFixed(2) + ')';
+    return 'Idea: ' + this.name + ' (' + this.p_true.toFixed(2) + ')';
   }
 });
 
 var Individual = Backbone.Model.extend({
-  threshold: 0.9,
   initialize: function(opts) {
     this.friends = [];
     // inbox is a dictionary whose keys are timesteps, and values are lists of Infections
     this.inbox = {};
     this.outbox = {};
 
+    this.x = (svg_width  / 2.0) + (Math.random() * 200) - 100;
+    this.y = (svg_height / 2.0) + (Math.random() * 200) - 100;
+
     // memory is a dictionary from the names of ideas to the number of time we've heard them.
     this.memory = {};
-    if (opts.threshold)
-      this.threshold = opts.threshold;
+    this.threshold = config.getFunction('threshold')();
+    // console.log('this.threshold', this.threshold);
   },
-  // addFriend: function(friend) {
-  //   if (friend !== this && _.excludes(this.friends, friend)) {
-  //     this.friends.push(friend);
-  //   }
-  // },
   receive: function(timestep, message) {
     if (this.inbox[timestep] === undefined) this.inbox[timestep] = [];
     if (message)
       this.inbox[timestep].push(message);
-    // if (_.excludes(this.infections(), infection)) {
-    //   // otherwise, contract with probability 1 -
-    //   var rand_unif = Math.random();
-    //   if (rand_unif < infection.infectiousness) {
-    //     this.inbox.push({infection: infection, timestep: timestep});
-    //   }
-    // }
   },
   outboxAt: function(timestep) {
-    if (!this.outbox[timestep]) {
+    if (isNaN(timestep)) {
+      throw Error('Cannot retrieve timestamps for NaN: ' + timestep);
+      // return [];
+    }
+    else if (timestep < 0) {
+      return [];
+    }
+    else if (timestep in this.outbox) {
+      return this.outbox[timestep];
+    }
+    else {
+      var previous_outbox = this.outboxAt(timestep - 1);
       // inherit the old outbox directly if we have one
-      var heeded = (this.outbox[timestep - 1] || []).slice(0);
+      var heeded = previous_outbox.slice(0);
 
       var infections = _.filter(this.inbox[timestep], function(message) { return message instanceof Infection; })
       var ideas = _.filter(this.inbox[timestep], function(message) { return message instanceof Idea; })
@@ -279,125 +323,155 @@ var Individual = Backbone.Model.extend({
       // assume that all ideas have the same content for now.
       var idea = ideas[0];
       if (idea) {
-        this.memory[idea.name] = (this.memory[idea.name] || 0) + ideas.length;
-        var probability_of_believing = 1 - Math.pow((1 - idea.believability), this.memory[idea.name])
-        // xxx: assert that the personal threshold is 0.5
-        if (probability_of_believing > this.threshold) {
-          heeded.push(idea);
+        var idea_p_false = 1 - idea.p_true;
+        var reliability = 0.66;
+        var mode = 'colin';
+        if (mode === 'colin') {
+          // var idea_p_false = 1 - idea.p_true;
+          var prod_x = ideas.map(function(idea) {
+            idea.reliability = reliability; // hack!
+
+            var pH1r = (idea.p_true * (1 - idea.reliability))
+            return pH1r / (idea.reliability + pH1r);
+          }).reduce(function(accumulator, value) {
+            return accumulator * value;
+          }, 1);
+
+          var believability = idea.p_true / (idea.p_true + ((1 - idea.p_true) * prod_x));
+          // console.log(timestep, '#', ideas.length, 'prod_x', prod_x, 'believability', believability);
+          if (Math.random() < believability) {
+            // console.log('Adopt!');
+            heeded.push(idea);
+          }
+        }
+        else {
+          if (config.getBool('memory'))
+            this.memory[idea.name] = (this.memory[idea.name] || 0) + ideas.length;
+          else
+            this.memory[idea.name] = ideas.length;
+
+          var times_ive_heard_idea = this.memory[idea.name];
+
+          var idea_power = 1 - Math.pow(idea_p_false, times_ive_heard_idea);
+          // console.log(timestep, '#', times_ive_heard_idea, 'p_adopt_idea', p_adopt_idea)
+          // xxx: assert that the personal threshold is 0.5
+          if (idea_power > this.threshold) {
+            heeded.push(idea);
+          }
         }
       }
-      // console.log('Outbox:', timestep, '.', infections.length, 'infections,', ideas.length, 'ideas,', heeded.length, 'heeded.');
+      // conso le.log('Outbox:', timestep, '.', infections.length, 'infections,', ideas.length, 'ideas,', heeded.length, 'heeded.');
 
       // remove duplicates (can only have a disease once at a time)
       this.outbox[timestep] = _.uniq(heeded, function(message) {
         return message.name;
       })
+      return this.outbox[timestep];
     }
-    return this.outbox[timestep];
   },
   active: function(timestep) {
-    // DON'T (for now): use outbox[ts] instead of outboxAt to ensure that it's already been computed
     return this.outboxAt(timestep).length > 0;
   }
 });
 
-var Population = Backbone.Model.extend({
-  initialize: function(opts) {
-    // opts.nodes (list of integers) and opts.edges (list of pairs of integers) must be set
-    var threshold = parseFloat($('#threshold').val());
-
-    var individuals = this.individuals = opts.nodes.map(function(i) {
-      return new Individual({threshold: threshold});
-    });
-    opts.edges.forEach(function(edge) {
-      // the edges that generateWattsStrogatz returns are undirected
-      individuals[edge[0]].friends.push(individuals[edge[1]]);
-      individuals[edge[1]].friends.push(individuals[edge[0]]);
-    });
-  },
+var IndividualCollection = Backbone.Collection.extend({
+  model: Individual,
   nodes: function() {
-    return this.individuals;
+    return this.models;
   },
   links: function() {
     var all_links = []; // list of (directed) {source: node1, target: node2} objects
-    this.individuals.forEach(function(individual, i) {
+    this.each(function(individual) {
       individual.friends.forEach(function(friend) {
         all_links.push({source: individual, target: friend});
       });
     });
     return all_links;
   },
-  // toString: function() {
-  //   return this.individuals.map(function(individual, i) {
-  //     return i + ':' + individual.toString();
-  //   }).join(' ');
-  // },
-  // infected: function(timestep) {
-  //   this.individuals.filter(function(individual) {
-  // });
-  activeIndividuals: function(timestep) {
-    return _.filter(this.individuals, function(individual) { return individual.active(timestep); });
-  }
+  active: function(timestep) {
+    // returns list of individuals
+    return this.filter(function(individual) {
+      return individual.active(timestep);
+    });
+  },
+  resetWithGraph: function(graph) {
+    // opts.nodes (list of integers) and opts.edges (list of pairs of integers) must be set
+    var individuals = graph.nodes.map(function(i) {
+      return new Individual();
+    });
+    graph.edges.forEach(function(edge) {
+      // the edges are undirected
+      individuals[edge[0]].friends.push(individuals[edge[1]]);
+      individuals[edge[1]].friends.push(individuals[edge[0]]);
+    });
+    this.reset(individuals);
+    // return new IndividualCollection(individuals);
+  },
 });
 
-var Simulation = Backbone.Model.extend({
-  timestep: 0,
+var GraphVisualization = Backbone.View.extend({
+  // mostly from http://bl.ocks.org/4062045
   r: 4,
-  total: false,
+  force: null,
+  link_selection: null,
+  node: null,
+  timestep: 1,
   initialize: function(opts) {
-    // if opts.visualize is true, expect opts.svg, and opts.population
-    this.population = opts.population;
-    this.visualize = opts.visualize;
-    if (this.visualize) {
-      this.initializeViz(opts.svg);
-      this.updateViz();
-    }
-  },
-  initializeViz: function(svg) {
-    var nodes = this.population.nodes(),
-      links = this.population.links();
-    // mostly from http://bl.ocks.org/4062045
-    this.width = parseInt(svg.attr('width'), 10);
-    this.height = parseInt(svg.attr('height'), 10);
-
+    // opts: svg
+    // console .log('graphviz init', svg_width, svg_height);
     this.force = d3.layout.force()
-      .size([this.width, this.height])
-      .charge(-1500)
-      .linkDistance(90)
-      .friction(0.3)
-      .nodes(nodes)
-      .links(links)
-      .start();
+      .size([svg_width, svg_height])
+      .charge(-500)
+      .linkDistance(50)
+      .friction(0.66);
+      // .gravity(0.1);
 
-    // $(svg).empty()
-    svg.selectAll('g.network').remove();
-    var g = svg.append('g')
-      .attr('class', 'network');
+      // .charge(-150)
+      // .linkDistance(40)
+      // .size([w *= 2 / 3, h *= 2 / 3]);
 
-    this.link = g.selectAll('line.link')
-        .data(links)
-      .enter().append('line')
-        .attr('class', 'link');
-
-    this.node = g.selectAll('circle.node')
-        .data(nodes)
-      .enter().append('circle')
-        .attr('class', 'node')
-        // .call(this.force.drag);
-    // node.append('title')
-        // .text(function(d) { return d.name; });
-
-    this.timestep_label = g.append('text')
-        .attr('class', 'label')
-        .attr('x', 5)
-        .attr('y', 15);
+    var g = this.g = opts.svg.selectAll('g.network')
+        .data([[]])
+    g.enter().append('g')
+        .attr('class', 'network');
 
     var self = this;
     this.force.on('tick', function() {
-      self.updateViz();
+      self.tick();
     });
   },
-  updateViz: function() {
+  update: function(nodes, links) {
+    this.timestep = 1;
+    this.force.nodes(nodes).links(links).start();
+    var g = this.g;
+
+    var link = this.link = g.selectAll('line.link')
+        .data(links, function(link) { return link.source.cid + '-' + link.target.cid; });
+    link.enter().append('line')
+        .attr('class', 'link');
+    link.exit().remove();
+
+    var node = this.node = g.selectAll('circle.node')
+        .data(nodes, function(node) { return node.cid; });
+    node.enter().append('circle')
+        .attr('class', 'node')
+        .call(this.force.drag);
+    node.exit().remove();
+
+    var label = this.label = g.selectAll('text')
+        .data([[]]);
+    label.enter().append('text')
+        .attr('class', 'label')
+        .attr('x', 5)
+        .attr('y', 15);
+    label.exit().remove(); // unnecessary
+
+    // this.tick();
+  },
+  tick: function(timestep) {
+    if (timestep === undefined) timestep = this.timestep;
+    else this.timestep = timestep;
+
     var self = this;
     this.link
       .attr('x1', function(d) { return d.source.x; })
@@ -405,25 +479,147 @@ var Simulation = Backbone.Model.extend({
       .attr('x2', function(d) { return d.target.x; })
       .attr('y2', function(d) { return d.target.y; })
       .style('stroke-width', function(d) {
-        return (d.source.active(self.timestep) * 1.5) + 0.4;
+        return (d.source.active(timestep) ? 1.5 : 0) + 0.4;
       })
       .style('stroke', function(d) {
-        return d.source.active(self.timestep) > 0 ? '#798' : 'orange';
+        return d.source.active(timestep) ? '#798' : 'orange';
       });
 
-    this.node.attr('cx', function(d) { return d.x = constrain(self.r, d.x, self.width - self.r); })
-      .attr('cy', function(d) { return d.y = constrain(self.r, d.y, self.height - self.r); })
-      .attr('r', function(d) { return d.active(self.timestep) > 0 ? self.r + .75 : self.r - .75; })
-      .style('fill', function(d) { return d.active(self.timestep) > 0 ? '#798' : 'orange'; });
+    // if (i == 0) { console .log(d.x, d.y); };
+    this.node
+      .attr('cx', function(d) { return d.x = constrain(self.r, d.x, svg_width - self.r); })
+      .attr('cy', function(d) { return d.y = constrain(self.r, d.y, svg_height - self.r); })
+      // .attr('cx', function(d) { return d.x; })
+      // .attr('cy', function(d) { return d.y; })
+      .attr('r', function(d) { return d.active(timestep) ? self.r + .75 : self.r - .75; })
+      .style('fill', function(d) { return d.active(timestep) ? '#798' : 'orange'; });
 
-    this.timestep_label.text('t = ' + (self.timestep));
+    this.label.text('t = ' + timestep);
+  },
+});
+
+var HistoryVisualization = Backbone.View.extend({
+  initialize: function(opts) {
+    // opts: svg, records
+    this.svg = opts.svg;
+    this.records = opts.records;
+
+    this.g = this.svg.selectAll('g.history').data([[]]);
+    this.g.enter().append('g').attr('class', 'history');
+
+    this.x_axis = this.g.append('g').attr('class', 'x axis');
+
+    this.y_axis = this.g.append('g').attr('class', 'y axis');
+
+    this.color = d3.scale.category20();
+  },
+  render: function() {
+    var data = this.records.map(function(r) { return r.slice(0); });
+    var history_width = svg_width - 80;
+    var history_height = config.getBool('visualize') ? 180 : svg_height - 40;
+    var x_max = d3.max(data, function(d) { return d.length; });
+    var xScale = d3.scale.linear().domain([0, x_max]).range([0, history_width]);
+    var xAxis = d3.svg.axis().scale(xScale).orient('bottom').tickFormat(d3.format('d'));
+    var y_max = d3.max(data, function(d) { return d3.max(d); });
+    var yScale = d3.scale.linear().domain([0, y_max]).range([history_height, 0]);
+    var yAxis = d3.svg.axis().scale(yScale).orient('left').tickFormat(d3.format('d'));
+
+    this.g
+      .attr('width', history_width)
+      .attr('height', history_height)
+      .attr('transform', 'translate(' + 40 + ',' + (svg_height - history_height - 25) + ')');
+
+    this.x_axis
+      .attr('transform', 'translate(0,' + history_height + ')')
+      .call(xAxis);
+
+    this.y_axis
+      .call(yAxis);
+
+    this.trajectories = this.g.selectAll('.trajectory')
+      .data(data, function(d, i) {
+        return i + '-' + d.length;
+      });
+
+    var self = this;
+    this.trajectories.enter()
+      .append('g')
+        .attr('class', 'trajectory')
+      .append('path')
+        .attr('fill', 'none')
+        .attr('stroke', function(d, i) { return self.color(i); })
+        .attr('d', d3.svg.line()
+          .x(function(d, i) { return xScale(i); }) //
+          .y(function(d, i) { return yScale(d); })
+        );
+
+    this.trajectories.exit()
+      .remove();
+  }
+});
+
+var Simulator = Backbone.Model.extend({
+  timestep: 0,
+  total: true,
+  records: [],
+  initialize: function(opts) {
+    // required: opts.svg
+    this.graph_viz = new GraphVisualization({svg: opts.svg});
+    this.history_viz = new HistoryVisualization({svg: opts.svg, records: this.records});
+    this.individuals = new IndividualCollection([]);
+  },
+  reset: function() {
+    // var N = constrain(2, parseInt($('#N').val(), 10), 100000);
+    // assert(!isNaN(N), "N must be a number!");
+    // var K = parseInt(config.get('K'), 10);
+    // var beta = parseFloat(config.get('beta'));
+
+    // var threshold = parseFloat($('#threshold').val());
+    // {threshold: threshold}
+    // Watts and Strogatz
+    // var graph = Graph.WattsStrogatz(N, K, beta);
+    // graph.nodes and graph.edges are now set correctly
+    var N = parseInt(config.get('N'), 10);
+    var generator_name = config.get('graph-generator');
+    var graph = Graph.generators[generator_name](config.toNumberJSON());
+    this.individuals.resetWithGraph(graph);
+
+    // start if off. patient zero(s).
+    var flu = new Infection({name: 'flu', infectiousness: parseFloat(config.get('infectiousness'))});
+    var rumor = new Idea({name: 'rumor', p_true: parseFloat(config.get('idea_p_true'))});
+    var seed_size = parseInt(config.get('seed_size'), 10); //constrain(1, , N);
+    assert(!isNaN(seed_size), "Initially infected must be a number!");
+
+    var transmission_type = config.get('type');
+
+    this.timestep = 1;
+    this.total = false;
+
+    // just zero out the other individuals (sending nothing to the initial group doesn't change anything)
+    this.individuals.each(function(individual) { individual.receive(0); });
+    for (var i = 0; i < seed_size; i++) {
+      var k;
+      // give up after 100 tries to avoid infinite loop (e.g., seed_size > N - 1)
+      for (var j = 0; j < 100; j++) {
+        k = Math.random() * N | 0;
+        if (!this.individuals.at(k).outbox.length)
+          break;
+      }
+      var box = [transmission_type === 'disease' ? flu : rumor];
+      this.individuals.at(k).outbox[0] = box;
+    }
+
+    if (config.getBool('visualize'))
+      this.graph_viz.update(this.individuals.nodes(), this.individuals.links());
+
+    this.records.push([this.individuals.active(0).length]);
   },
   step: function() {
     var self = this;
     // proceed with the next wave, i.e. send messages around
     this.timestep++;
-    // timestamp = 1 is the first one that we send around messages for
-    this.population.individuals.forEach(function(individual) {
+    // timestep = 1 is the first one that we send around messages for
+    this.individuals.each(function(individual) {
       individual.friends.forEach(function(friend) {
         // calculate what goes to all the friends' inboxes from this individuals' last outbox
         // it doesn't matter if they are infections or ideas, tell *everyone*
@@ -435,180 +631,73 @@ var Simulation = Backbone.Model.extend({
       //   this is kind of hackish.
       individual.receive(self.timestep);
     });
-    // at this point, all infections for the "timestamp" slot are finished.
+    // at this point, all infections for the "timestep" slot are finished.
     // so we solidify the results, but calling out whose active
-    var total_active = this.population.activeIndividuals(this.timestep).length;
-    this.total = total_active === this.population.individuals.length;
+    var total_active = this.individuals.active(this.timestep).length;
+    this.total = (total_active === this.individuals.length);
 
-    if (this.visualize)
-      this.updateViz();
+    if (config.getBool('visualize'))
+      this.graph_viz.tick(this.timestep);
 
-    return total_active;
+    _.last(this.records).push(total_active);
   },
-  // his tory: function() {
-  //   var self = this;
-  //   // count and record current inf ections
-  //   return _.range(this.timestep + 2).map(function(timestep) {
-  //     return self.population.individuals.filter(function(individual) {
-  //       return individual.infe ctions(timestep).length
-  //     }).length;
-  //   });
-  // }
-});
-
-var Generator = Backbone.Model.extend({
-  initialize: function(opts) {
-    this.records = [];
-    this.animateInterval = null;
-  },
-  reset: function() {
-    var N = constrain(2, parseInt($('#N').val(), 10), 100000);
-    var K = parseInt($('#K').val(), 10);
-    var beta = parseFloat($('#beta').val());
-    assert(!isNaN(N), "N must be a number!");
-
-    // Watts and Strogatz
-    // var graph = Graph.WattsStrogatz(N, K, beta);
-    var graph = Graph.BarabasiAlbert(N, K, beta);
-    // graph.nodes and graph.edges are now set correctly
-    var population = new Population(graph);
-    window.population = population;
-
-    // start if off. patient zero(s).
-    // transmittability = infectiousness = believability
-    var transmittability = constrain(0, parseFloat($('#infectiousness').val()), 1.0);
-    var flu = new Infection({name: 'flu', infectiousness: transmittability});
-    var rumor = new Idea({name: 'rumor', believability: transmittability});
-    var initial = constrain(1, parseInt($('#initial').val(), 10), N);
-    assert(!isNaN(initial), "Initially infected must be a number!");
-
-    var transmission_type = $('[name="type"]:checked').val();
-    // console.log('transmission_type', transmission_type);
-
-    // just zero out the other individuals (sending nothing to the initial group doesn't change anything)
-    population.individuals.forEach(function(individual) { individual.receive(0); });
-    for (var i = 0; i < initial; i++) {
-      var k;
-      // give up after 100 tries to avoid infinite loop (e.g., initial = N - 1)
-      for (var j = 0; j < 100; j++) {
-        k = Math.random() * N | 0;
-        if (!population.individuals[k].outbox.length)
-          break;
-      }
-      // console.log("Forcefully implanting/infecting", k, population.individuals[k]);
-      if (transmission_type === 'Disease')
-        population.individuals[k].outbox[0] = [flu];
-      else
-        population.individuals[k].outbox[0] = [rumor];
-    }
-
-    var interval_ms = constrain(10, parseInt($('#interval').val(), 10), 5000);
-
-    this.visualize = $('#visualize').prop('checked');
-    this.animate = $('#animate').prop('checked');
+  next: function() {
     var self = this;
-    if (this.animate) {
-      this.animateInterval = setInterval(function() {
-        self.step();
-      }, this.visualize ? interval_ms : 10);
-    }
 
-    this.simulation = new Simulation({population: population, visualize: this.visualize, svg: svg});
-  },
-  step: function() {
-    if (this.simulation === undefined || this.simulation.total) {
-      // console.log("Beginning:", this.simulation === undefined, "/ Simulation-total", (this.simulation || {}).total);
-      if (this.animate) {
-        clearInterval(this.animateInterval);
-      }
+    if (this.total) {
       this.reset();
-      this.records.push([this.simulation.population.activeIndividuals(0).length]);
     }
     else {
-      var infected = this.simulation.step();
-      _.last(this.records).push(infected);
-      this.renderHistory();
+      this.step();
     }
-  },
-  renderHistory: function() {
-    var svg_height = parseInt(svg.attr('height'), 10);
-    var svg_width = parseInt(svg.attr('width'), 10);
-    var records = this.records;
-    var history_width = svg_width - 80, history_height = this.visualize ? 180 : svg_height - 40;
-    // body_width = svg_width - (margins.left + margins.right),
-    // body_height = svg_height - (margins.top + margins.bottom);
-    // window.records = records;
 
-    var x_max = d3.max(records, function(d) { return d.length; }),
-      xScale = d3.scale.linear().domain([0, x_max]).range([0, history_width]),
-      xAxis = d3.svg.axis().scale(xScale).orient('bottom').tickFormat(d3.format('d')),
-      // .tickSize(-body_height).tickPadding(5).ticks(d3.time.days, 1),
-      y_max = d3.max(records, function(d) { return d3.max(d); }),
-      yScale = d3.scale.linear().domain([0, y_max]).range([history_height, 0]),
-      yAxis = d3.svg.axis().scale(yScale).orient('left').tickFormat(d3.format('d'));
+    this.history_viz.render();
 
-    var color = d3.scale.category20();
-
-    svg.selectAll('g.history').remove();
-    var g = svg.append('g')
-      .attr('class', 'history')
-      .attr('width', history_width)
-      .attr('height', history_height)
-      .attr('transform', 'translate(' + 40 + ',' + (svg_height - history_height - 25) + ')');
-
-    g.append('g')
-      .attr('class', 'x axis')
-      .attr('transform', 'translate(0,' + history_height + ')')
-      .call(xAxis)
-
-    g.append('g')
-      .attr('class', 'y axis')
-      .call(yAxis)
-
-    g.append('g')
-      .attr('class', 'messages')
-    .selectAll('path')
-      .data(records)
-    .enter().append('path')
-      // .attr('class', 'history')
-      .attr('stroke', function(d, i) { return color(i); })
-      .attr('fill', 'none')
-      .attr('d', d3.svg.line()
-        .x(function(d, i) { return xScale(i); })
-        .y(function(d, i) { return yScale(d); })
-      );
+    if (config.getBool('iterate_automatically')) {
+      // constrain(10, , 5000);
+      var interval_ms = config.getBool('visualize') ? parseInt(config.get('interval_ms'), 10) : 10;
+      setTimeout(function() {
+        self.next();
+      }, interval_ms);
+    }
   }
 });
 
-var world_records = [];
+// config.on('change:visualize', function(ev) {
+//   // if they check off the visualize checkbox, remove the graph
+//   if (!ev.checked) {
+//     svg.selectAll('g.network').remove();
+//   }
+// })
 
-var generator = new Generator();
-var svg;
-$('#reload').click(step);
-$('#visualize').on('click', function() {
-  // if they check off the visualize checkbox, remove the graph
-  if (!$(this).prop('checked')) {
-    svg.selectAll('g.network').remove();
-  }
-})
+var svg, svg_width, svg_height;
+$(function() {
+  svg = d3.select('#content').append('svg');
+  resize();
+  var simulator = new Simulator({svg: svg});
+  simulator.next();
 
-function step() {
-  generator.step();
+  $(document).on('keydown', function(ev) {
+    // newline: 32, space: 13
+    if (ev.which === 32 || ev.which === 13) {
+      simulator.next();
+    }
+  });
+});
+
+function resize() {
+  svg_width = $('#content').width();
+  svg_height = $(window).height() - $('#configuration').outerHeight(true) - 20;
+  $('#content').height(svg_height);
+  svg.attr('width', svg_width).attr('height', svg_height);
 }
-persistence.on('ready', function() {
-  $('#chart').height(document.height - $('#controls').outerHeight(true) - 16).empty();
-  var width = $('#chart').width(),
-    height = $('#chart').height();
-  svg = d3.select('#chart').append('svg')
-    .attr('width', width)
-    .attr('height', height);
-  step();
-});
-$(document).on('keydown', function(ev) {
-  // newline: 32, space: 13
-  if (ev.which === 32 || ev.which === 13) {
-    generator.step();
-  }
-});
+$(window).resize(resize);
+
+// <g class="network"></g>
+// <g class="history">
+//   <g class="y axis"></g>
+//   <g class="x axis"></g>
+//   <g class="trajectories"></g>
+// </g>
 
 </script>

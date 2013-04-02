@@ -1,0 +1,20 @@
+_.excludes = function() { return !_.contains.apply(_, arguments); }
+_.rep = function(n, value) {
+  var values = new Array(n);
+  for (var i = 0; i < n; i++) {
+    values[i] = value;
+  }
+  return values;
+}
+Array.prototype.remove = function(item) {
+  // allow removing slices or single objects
+  var index = this.indexOf(item);
+  if (index !== -1)
+    return this.removeAt(index);
+};
+// Array removeAt - By John Resig (MIT Licensed)
+Array.prototype.removeAt = function(index) {
+  var rest = this.slice(index + 1 || this.length);
+  this.length = index < 0 ? this.length + index : index;
+  return this.push.apply(this, rest);
+};
