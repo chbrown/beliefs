@@ -4,13 +4,14 @@ body{padding:5px;font-size:80%}
 input[type=text]{width:5em}
 fieldset{display:inline-block;margin:0 10px 0 0}
 fieldset legend{text-transform:uppercase;font-weight:700;font-size:80%}
-.block-labels label,.vertical-labels label{display:block}
+.block-labels label{display:block}
+.vertical-labels label{display:block}
 .vertical-labels label{margin:2px 0}
 .vertical-labels label span{min-width:24px}
 .horizontal-labels label{display:inline-block;margin:0 2px}
 .horizontal-labels label span{padding:0 1px}
 h4{margin:5px 0}
-.axis line,.axis path{fill:none;stroke:#444;shape-rendering:crispEdges}
+.axis path,.axis line{fill:none;stroke:#444;shape-rendering:crispEdges}
 .axis text{font-size:80%}
 .grid line{stroke:#999;shape-rendering:crispEdges}
 .grid path{fill:none;shape-rendering:crispEdges}
